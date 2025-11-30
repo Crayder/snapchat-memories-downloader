@@ -10,6 +10,8 @@ const DEFAULT_OPTIONS: PipelineRunRequest['options'] = {
   throttleDelayMs: 0,
   attemptTimeoutMs: 15000,
   cleanupDownloads: false,
+  batchPauseCount: 0,
+  retryFailedOnly: false,
   keepZipPayloads: false,
   dedupeStrategy: 'move',
   dryRun: false,
@@ -71,14 +73,63 @@ const App = () => {
   const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null);
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [reportCopyMessage, setReportCopyMessage] = useState<string>('');
+  const [autoPauseOnError, setAutoPauseOnError] = useState(true);
+  const [batchPauseEnabled, setBatchPauseEnabled] = useState(DEFAULT_OPTIONS.batchPauseCount > 0);
+  const [batchOperationCount, setBatchOperationCount] = useState(0);
+  const [retryFailuresOnly, setRetryFailuresOnly] = useState(false);
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batchOperationRef = useRef(0);
+  const autoPauseLockRef = useRef(false);
+  const runningRef = useRef(running);
+  const pausedRef = useRef(paused);
+  const autoPauseOnErrorRef = useRef(autoPauseOnError);
+  const batchPauseEnabledRef = useRef(batchPauseEnabled);
+  const batchSizeRef = useRef(options.batchPauseCount);
+  const handlePauseRef = useRef<(() => Promise<void>) | null>(null);
 
   const pushLog = useCallback((message: string) => {
     setLogs((current) => [{ timestamp: new Date().toLocaleTimeString(), message }, ...current].slice(0, 200));
   }, []);
 
   useEffect(() => {
+    const requestAutoPause = (reason: string) => {
+      if (autoPauseLockRef.current || !handlePauseRef.current) {
+        return;
+      }
+      autoPauseLockRef.current = true;
+      handlePauseRef.current()
+        .then(() => {
+          batchOperationRef.current = 0;
+          setBatchOperationCount(0);
+          pushLog(reason);
+        })
+        .finally(() => {
+          autoPauseLockRef.current = false;
+        });
+    };
+
     const dispose = window.electronAPI.onProgress((event: PipelineProgressEvent) => {
+      if (event.type === 'entry-status') {
+        batchOperationRef.current += 1;
+        setBatchOperationCount(batchOperationRef.current);
+        if (
+          batchPauseEnabledRef.current &&
+          batchSizeRef.current > 0 &&
+          batchOperationRef.current >= batchSizeRef.current &&
+          runningRef.current &&
+          !pausedRef.current
+        ) {
+          requestAutoPause(`Auto-paused after ${batchSizeRef.current} operations.`);
+        }
+      }
+
+      if (event.type === 'error') {
+        pushLog(`Error: ${event.message ?? 'Unknown error'}`);
+        if (autoPauseOnErrorRef.current && runningRef.current && !pausedRef.current) {
+          requestAutoPause('Auto-paused because an error was logged.');
+        }
+      }
+
       if (event.type === 'stats' && event.stats) {
         setStats(event.stats);
         return;
@@ -97,9 +148,6 @@ const App = () => {
       if (event.type === 'log' && event.message) {
         pushLog(event.message);
       }
-      if (event.type === 'error') {
-        pushLog(`Error: ${event.message ?? 'Unknown error'}`);
-      }
       if (event.type === 'summary' && event.summary) {
         setSummary(event.summary);
         setStep(5);
@@ -115,6 +163,36 @@ const App = () => {
       clearTimeout(copyResetRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    runningRef.current = running;
+  }, [running]);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    autoPauseOnErrorRef.current = autoPauseOnError;
+  }, [autoPauseOnError]);
+
+  useEffect(() => {
+    batchPauseEnabledRef.current = batchPauseEnabled;
+  }, [batchPauseEnabled]);
+
+  useEffect(() => {
+    batchSizeRef.current = options.batchPauseCount;
+    if (!running) {
+      setBatchPauseEnabled(options.batchPauseCount > 0);
+    }
+  }, [options.batchPauseCount, running]);
+
+  useEffect(() => {
+    if (!running) {
+      batchOperationRef.current = 0;
+      setBatchOperationCount(0);
+    }
+  }, [running, paused]);
 
   const canRun = useMemo(() => exportZip && outputDir && !running, [exportZip, outputDir, running]);
 
@@ -147,7 +225,7 @@ const App = () => {
   };
 
   const handleNumberChange = (
-    key: 'concurrency' | 'retryLimit' | 'throttleDelayMs' | 'attemptTimeoutMs',
+    key: 'concurrency' | 'retryLimit' | 'throttleDelayMs' | 'attemptTimeoutMs' | 'batchPauseCount',
     multiplier = 1
   ) => (event: ChangeEvent<HTMLInputElement>) => {
     const raw = Number(event.target.value);
@@ -166,10 +244,13 @@ const App = () => {
     setDiagnosticsPath(null);
     setPhase('initializing');
     setStep(4);
+    batchOperationRef.current = 0;
+    setBatchOperationCount(0);
+    setBatchPauseEnabled(options.batchPauseCount > 0);
     const payload: PipelineRunRequest = {
       exportZipPath: exportZip,
       outputDir,
-      options
+      options: { ...options, retryFailedOnly: retryFailuresOnly }
     };
     try {
       const result = await window.electronAPI.runPipeline(payload);
@@ -179,6 +260,7 @@ const App = () => {
       pushLog(`Run failed: ${(error as Error).message}`);
     } finally {
       setRunning(false);
+      setRetryFailuresOnly(false);
     }
   };
 
@@ -193,6 +275,10 @@ const App = () => {
     const result = await window.electronAPI.resumePipeline();
     setPaused(result.paused);
   };
+
+  useEffect(() => {
+    handlePauseRef.current = handlePause;
+  }, [handlePause]);
 
   const handleDiagnostics = async () => {
     try {
@@ -230,6 +316,9 @@ const App = () => {
     setLastMessage('Ready to retry failed memories.');
     pushLog('Returned to Run step to retry failures. Start the run again to resume.');
     setStep(4);
+    setRetryFailuresOnly(true);
+    batchOperationRef.current = 0;
+    setBatchOperationCount(0);
   };
 
   const handleRestartWizard = () => {
@@ -482,6 +571,19 @@ const App = () => {
       <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
         Snapchat can rate limit aggressively if concurrency is high and no delay is used. Start with a 250-500 ms delay and increase slowly once the export flows reliably; keep the timeout under a minute so individual memories do not stall the queue indefinitely.
       </div>
+      <label className="space-y-2 text-sm" data-tooltip="Automatically pause after this many entry operations (0 disables). Keeps runs bite-sized for manual review.">
+        <span className="text-xs uppercase text-slate-400">Auto-pause batch size</span>
+        <input
+          className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none transition focus:border-brand-400"
+          type="number"
+          min={0}
+          step={5}
+          value={options.batchPauseCount}
+          onChange={handleNumberChange('batchPauseCount')}
+          disabled={running}
+        />
+        <span className="block text-xs text-slate-500">Set to 0 to keep running continuously. You can still toggle the batch pauser on the Run tab.</span>
+      </label>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Keep caption ZIP payloads for manual review instead of deleting them once merged.">
           <input
@@ -571,6 +673,38 @@ const App = () => {
         <p className="text-xs text-slate-400">
           {diagnosticsBusy ? 'Preparing diagnostics bundle…' : `Latest diagnostics bundle: ${diagnosticsPath}`}
         </p>
+      )}
+      <div className="flex flex-wrap gap-4 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-slate-200">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-white/30 bg-black"
+            checked={autoPauseOnError}
+            onChange={(event) => setAutoPauseOnError(event.target.checked)}
+          />
+          <span>Auto-pause on errors</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-white/30 bg-black"
+            checked={batchPauseEnabled && options.batchPauseCount > 0}
+            onChange={(event) => setBatchPauseEnabled(event.target.checked)}
+            disabled={options.batchPauseCount === 0}
+          />
+          <span>
+            Pause every {options.batchPauseCount || '—'} operations
+            <span className="ml-2 text-xs text-slate-400">(current batch: {batchOperationCount})</span>
+          </span>
+        </label>
+        {options.batchPauseCount === 0 && (
+          <p className="text-xs text-slate-400">Set a batch size above zero in Options to enable batch pauses.</p>
+        )}
+      </div>
+      {retryFailuresOnly && (
+        <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+          Retry mode is active — the next run will only reattempt entries that previously failed.
+        </div>
       )}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

@@ -7,3 +7,8 @@
 - [x] Add Finish page continuation options (retry failures, restart, exit).
 - [x] Implement post-run cleanup: relocate state.json to output root, delete .tmp/work, optional downloads purge, remove empty duplicates.
 - [x] Add Finish page action to open the output folder.
+- [x] Ensure packaged app taskbar icon uses the new stacked-cards artwork.
+- [x] Resolve ZIP payload processing so composed media lands in the memories folder without errors.
+- [x] Add a Run-page "auto-pause on error" toggle that halts automatically when failures hit the log.
+- [x] Make "Retry failures" only reattempt entries that previously failed instead of redownloading everything.
+- [x] Add a batch pause option (configurable count, runtime toggle) to auto-pause after N operations.

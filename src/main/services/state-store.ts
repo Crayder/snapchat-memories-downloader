@@ -52,6 +52,10 @@ export class StateStore {
     return this.state.entries[index];
   }
 
+  snapshot(): Record<number, EntryStateRecord> {
+    return JSON.parse(JSON.stringify(this.state.entries));
+  }
+
   upsert(record: EntryStateRecord): void {
     this.state.entries[record.index] = { ...this.state.entries[record.index], ...record };
   }

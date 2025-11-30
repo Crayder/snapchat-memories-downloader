@@ -37,6 +37,8 @@ export interface PipelineOptions {
   attemptTimeoutMs: number;
   keepZipPayloads: boolean;
   cleanupDownloads: boolean;
+  batchPauseCount: number;
+  retryFailedOnly?: boolean;
   dedupeStrategy: 'move' | 'delete' | 'none';
   dryRun: boolean;
   verifyOnly: boolean;

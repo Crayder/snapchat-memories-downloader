@@ -4,6 +4,7 @@ import { ensureAppDirectories, getAppPaths } from '../config/app-paths.js';
 import { ImportService } from '../services/import-service.js';
 import { IndexParser } from '../services/index-parser.js';
 import { StateStore } from '../services/state-store.js';
+import type { EntryStateRecord } from '../services/state-store.js';
 import { DownloadService } from '../services/download-service.js';
 import { PostProcessService } from '../services/post-process-service.js';
 import { MetadataService } from '../services/metadata-service.js';
@@ -52,7 +53,24 @@ export class PipelineRunner {
 
       progress({ type: 'phase', phase: 'parse-index' });
       const indexFile = importResult.jsonPath ?? importResult.htmlPath!;
-      const entries = await this.parser.parse(indexFile);
+      let entries = await this.parser.parse(indexFile);
+      const stateSnapshot = stateStore.snapshot();
+      this.restoreEntriesFromState(entries, stateSnapshot);
+      if (request.options.retryFailedOnly) {
+        const failedIndexes = new Set(
+          Object.values(stateSnapshot)
+            .filter((record) => record.downloadStatus === 'failed')
+            .map((record) => record.index)
+        );
+        entries = entries.filter((entry) => failedIndexes.has(entry.index));
+        if (entries.length === 0) {
+          progress({ type: 'log', message: 'No failed entries remain; finishing without rerun.' });
+          const finishedAt = new Date();
+          const summary = this.buildSummary(entries, startedAt, finishedAt);
+          progress({ type: 'phase', phase: 'complete' });
+          return summary;
+        }
+      }
       this.emitStats(entries, 'parsed', progress);
 
       if (request.options.dryRun) {
@@ -307,6 +325,24 @@ export class PipelineRunner {
       await fs.remove(dir);
     } catch (error) {
       log.warn('Failed to remove legacy state directory %s: %s', dir, (error as Error).message);
+    }
+  }
+
+  private restoreEntriesFromState(entries: MemoryEntry[], snapshot: Record<number, EntryStateRecord>): void {
+    for (const entry of entries) {
+      const stored = snapshot[entry.index];
+      if (!stored) {
+        continue;
+      }
+      if (stored.downloadStatus) {
+        entry.downloadStatus = stored.downloadStatus;
+      }
+      if (stored.downloadedPath) {
+        entry.downloadedPath = stored.downloadedPath;
+      }
+      if (stored.finalPath) {
+        entry.finalPath = stored.finalPath;
+      }
     }
   }
 }

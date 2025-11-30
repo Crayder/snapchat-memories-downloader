@@ -7,7 +7,7 @@ import type { FfprobeData } from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobe from 'ffprobe-static';
 import StreamZip from 'node-stream-zip';
-import type { MemoryEntry } from '../../shared/types/memory-entry.js';
+import type { MemoryEntry, MemoryMediaType } from '../../shared/types/memory-entry.js';
 import { buildOutputName } from '../utils/naming.js';
 import { detectMagicType } from '../utils/magic-bytes.js';
 import type { ProgressCallback } from '../types.js';
@@ -29,7 +29,7 @@ export interface PostProcessOptions {
 }
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.m4v'];
-const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.heic'];
+const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.heic', '.gif', '.webp'];
 
 export class PostProcessService {
   constructor(private readonly options: PostProcessOptions, private readonly investigation?: InvestigationJournal) {}
@@ -97,11 +97,16 @@ export class PostProcessService {
       throw new Error('Unable to identify base media within caption ZIP.');
     }
 
-    if (entry.mediaType === 'video' && VIDEO_EXTS.includes(path.extname(base).toLowerCase())) {
+    const baseExt = path.extname(base).toLowerCase();
+    const inferredType = this.inferMediaTypeFromExt(baseExt);
+    const targetMediaType: MemoryMediaType = (inferredType ?? entry.mediaType ?? 'image');
+    entry.mediaType = targetMediaType;
+
+    if (targetMediaType === 'video') {
       const overlayAsset = overlays.length ? await this.mergeOverlays(overlays, await this.getVideoDimensions(base)) : undefined;
-      await this.overlayVideo(base, overlayAsset, entry);
+      await this.overlayVideo(base, overlayAsset, entry, targetMediaType);
     } else {
-      await this.composeImage(base, overlays, entry);
+      await this.composeImage(base, overlays, entry, targetMediaType);
     }
 
     if (!this.options.keepZipPayloads) {
@@ -110,20 +115,20 @@ export class PostProcessService {
     await fs.remove(extractDir);
   }
 
-  private async composeImage(basePath: string, overlays: string[], entry: MemoryEntry): Promise<void> {
+  private async composeImage(basePath: string, overlays: string[], entry: MemoryEntry, mediaType: MemoryMediaType = 'image'): Promise<void> {
     let pipeline = sharp(basePath);
     if (overlays.length) {
       const comps = overlays.map((overlay) => ({ input: overlay, left: 0, top: 0 }));
       pipeline = pipeline.composite(comps);
     }
-    const finalName = buildOutputName(entry.capturedAtUtc, 'image', entry.index, path.extname(basePath) || '.jpg');
+    const finalName = buildOutputName(entry.capturedAtUtc, mediaType === 'video' ? 'video' : 'image', entry.index, path.extname(basePath) || '.jpg');
     const finalPath = path.join(this.options.outputDir, finalName);
     await pipeline.toFile(finalPath);
     entry.finalPath = finalPath;
   }
 
-  private async overlayVideo(basePath: string, overlayPath: string | undefined, entry: MemoryEntry): Promise<void> {
-    const finalName = buildOutputName(entry.capturedAtUtc, 'video', entry.index, path.extname(basePath) || '.mp4');
+  private async overlayVideo(basePath: string, overlayPath: string | undefined, entry: MemoryEntry, mediaType: MemoryMediaType = 'video'): Promise<void> {
+    const finalName = buildOutputName(entry.capturedAtUtc, mediaType === 'image' ? 'image' : 'video', entry.index, path.extname(basePath) || '.mp4');
     const finalPath = path.join(this.options.outputDir, finalName);
 
     if (!overlayPath) {
@@ -239,5 +244,15 @@ export class PostProcessService {
       acc[ext] = (acc[ext] ?? 0) + 1;
       return acc;
     }, {});
+  }
+
+  private inferMediaTypeFromExt(ext: string): MemoryMediaType | undefined {
+    if (VIDEO_EXTS.includes(ext)) {
+      return 'video';
+    }
+    if (IMAGE_EXTS.includes(ext)) {
+      return 'image';
+    }
+    return undefined;
   }
 }

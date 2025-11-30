@@ -11,6 +11,14 @@ import { ensureAppDirectories } from './config/app-paths.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const resolveAppIcon = (): string => {
+  const assetName = process.platform === 'win32' ? 'app.ico' : process.platform === 'darwin' ? 'app.icns' : 'icon-512.png';
+  if (is.dev) {
+    return path.resolve(__dirname, '../../resources/bin/icons', assetName);
+  }
+  return path.join(process.resourcesPath, 'bin', 'icons', assetName);
+};
+
 let mainWindow: BrowserWindow | null = null;
 const runner = new PipelineRunner();
 
@@ -21,6 +29,7 @@ const createWindow = async () => {
     height: 800,
     show: false,
     title: 'Snapchat Memories Downloader',
+    icon: resolveAppIcon(),
     webPreferences: {
       // electron-vite outputs preload bundle as preload.mjs; use explicit extension
       preload: path.join(__dirname, '../preload/preload.mjs'),
@@ -47,7 +56,7 @@ const createWindow = async () => {
 };
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('app.snap.memories.backup');
+  electronApp.setAppUserModelId('app.snap.memories.downloader');
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);
