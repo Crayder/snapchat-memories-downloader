@@ -1,4 +1,4 @@
-![Snapchat Memories Downloader icon](resources/bin/icons/icon-128.png)
+![Snapchat Memories Downloader icon](resources/icons/stacked-cards-arrow.svg)
 
 # Snapchat Memories Downloader
 
