@@ -13,7 +13,32 @@ const DEFAULT_OPTIONS: PipelineRunRequest['options'] = {
   verifyOnly: false
 };
 
-const STEPS = ['Welcome', 'Select Export', 'Choose Output', 'Options', 'Run', 'Finish'];
+const STEPS = [
+  {
+    title: 'Welcome',
+    description: 'Confirm you have the right export, understand the guarantees, and review the safety warnings.'
+  },
+  {
+    title: 'Select Export',
+    description: 'Point the app at the Snapchat My Data ZIP that still contains the untouched memories HTML/JSON.'
+  },
+  {
+    title: 'Choose Output',
+    description: 'Pick an empty destination folder where the finalized archive and reports will be written.'
+  },
+  {
+    title: 'Options',
+    description: 'Tune concurrency, retries, dedupe behavior, and advanced toggles before running.'
+  },
+  {
+    title: 'Run',
+    description: 'Monitor downloads, pause/resume safely, and capture diagnostics while processing.'
+  },
+  {
+    title: 'Finish',
+    description: 'Review the summary, open reports, and export diagnostics for support if needed.'
+  }
+];
 
 type LogEntry = {
   timestamp: string;
@@ -154,71 +179,50 @@ const App = () => {
     }
   };
 
-  const canAdvance = (current: number): boolean => {
-    if (current === 0) return true;
-    if (current === 1) return Boolean(exportZip);
-    if (current === 2) return Boolean(outputDir);
-    if (current === 3) return true;
-    return false;
-  };
+  const renderStats = () => {
+    const entries = [
+      { label: 'Total Memories', value: stats?.total ?? '--' },
+      { label: 'Images', value: stats?.images ?? '--' },
+      { label: 'Videos', value: stats?.videos ?? '--' },
+      { label: 'With GPS', value: stats?.withGps ?? '--' },
+      { label: 'Downloads', value: stats?.downloaded ?? 0 },
+      { label: 'Processed', value: stats?.processed ?? 0 },
+      { label: 'Metadata', value: stats?.metadataWritten ?? 0 },
+      { label: 'Deduped', value: stats?.deduped ?? 0 },
+      { label: 'Failures', value: stats?.failures ?? 0 }
+    ];
 
-  const goNext = () => {
-    setStep((prev) => Math.min(prev + 1, 4));
+    return (
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {entries.map((entry) => (
+          <div key={entry.label} className="stat-card">
+            <p className="text-xs uppercase tracking-wide text-slate-400">{entry.label}</p>
+            <p className="text-2xl font-semibold text-white">{entry.value}</p>
+          </div>
+        ))}
+      </div>
+    );
   };
-
-  const goBack = () => {
-    setStep((prev) => Math.max(prev - 1, 0));
-  };
-
-  const renderStats = () => (
-    <div className="stats-grid">
-      <div>
-        <strong>Total Memories</strong>
-        <span>{stats?.total ?? '--'}</span>
-      </div>
-      <div>
-        <strong>Images</strong>
-        <span>{stats?.images ?? '--'}</span>
-      </div>
-      <div>
-        <strong>Videos</strong>
-        <span>{stats?.videos ?? '--'}</span>
-      </div>
-      <div>
-        <strong>With GPS</strong>
-        <span>{stats?.withGps ?? '--'}</span>
-      </div>
-      <div>
-        <strong>Downloads</strong>
-        <span>{stats?.downloaded ?? 0}</span>
-      </div>
-      <div>
-        <strong>Processed</strong>
-        <span>{stats?.processed ?? 0}</span>
-      </div>
-      <div>
-        <strong>Metadata</strong>
-        <span>{stats?.metadataWritten ?? 0}</span>
-      </div>
-      <div>
-        <strong>Deduped</strong>
-        <span>{stats?.deduped ?? 0}</span>
-      </div>
-      <div>
-        <strong>Failures</strong>
-        <span>{stats?.failures ?? 0}</span>
-      </div>
-    </div>
-  );
 
   const renderStepper = () => (
-    <div className="stepper">
-      {STEPS.map((label, index) => {
-        const state = index === step ? 'active' : index < step ? 'complete' : 'upcoming';
+    <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+      {STEPS.map((info, index) => {
+        const isActive = index === step;
+        const isComplete = index < step;
+        const stateClasses = isActive
+          ? 'border-brand-400 bg-brand-500/10 text-white'
+          : isComplete
+            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+            : 'border-white/10 bg-white/5 text-slate-300';
         return (
-          <div key={label} className={`step ${state}`}>
-            <span className="step-index">{index + 1}</span>
-            <span className="step-label">{label}</span>
+          <div key={info.title} className={`flex gap-3 rounded-2xl border p-4 transition ${stateClasses}`}>
+            <div className={`flex h-10 w-10 items-center justify-center rounded-xl font-semibold ${isActive || isComplete ? 'bg-white/90 text-slate-900' : 'bg-slate-800 text-white/80'}`}>
+              {index + 1}
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">{info.title}</p>
+              <p className="text-xs text-slate-300">{info.description}</p>
+            </div>
           </div>
         );
       })}
@@ -226,140 +230,264 @@ const App = () => {
   );
 
   const renderWelcome = () => (
-    <section className="card">
-      <h2>Welcome</h2>
-      <p>
-        Everything happens locally on your machine. Before you begin, make sure you requested a Snapchat export that includes JSON data and that you run this tool within a few days of the download link being issued (links expire quickly).
-      </p>
-      <ul className="notice-list">
-        <li>When requesting your export, toggle on <strong>JSON</strong> so memories_history.json is included.</li>
-        <li>Download and run this workflow as soon as you receive the email—Snapchat links generally expire in 72 hours.</li>
-        <li>Keep the ZIP untouched until ingest; the app extracts to a sandboxed work folder.</li>
+    <section className="glass-card space-y-6">
+      <div className="space-y-3">
+        <h2 className="text-2xl font-semibold">Welcome — Know What to Expect</h2>
+        <p className="text-sm text-slate-300">
+          Everything runs locally. The wizard guides you through selecting the export ZIP, choosing an output folder, configuring safeguards, and running the auditable pipeline.
+          Complete each bullet before advancing.
+        </p>
+      </div>
+      <ul className="notice-list list-decimal space-y-3 pl-5 text-sm">
+        <li>Request a Snapchat export with the <strong>JSON Memories listing enabled</strong>. HTML-only exports work but lack resilience.</li>
+        <li>Download the ZIP and keep it untouched; the app copies it into a sandboxed working directory for deterministic processing.</li>
+        <li>Run this workflow within 72 hours of receiving the export email—signed download links expire quickly.</li>
+        <li>Have enough disk space for both the working set and the finalized archive (roughly 2× your export size).</li>
       </ul>
-    </section>
-  );
-
-  const renderSelectExport = () => (
-    <section className="card">
-      <h2>1. Select Export Zip</h2>
-      <div className="field-row">
-        <button onClick={handleChooseZip} disabled={running}>Choose ZIP</button>
-        <span className="path">{exportZip || 'No file selected'}</span>
-      </div>
-    </section>
-  );
-
-  const renderSelectOutput = () => (
-    <section className="card">
-      <h2>2. Choose Output Folder</h2>
-      <div className="field-row">
-        <button onClick={handleChooseOutput} disabled={running}>Choose Folder</button>
-        <span className="path">{outputDir || 'No folder selected'}</span>
-      </div>
-    </section>
-  );
-
-  const renderOptions = () => (
-    <section className="card">
-      <h2>3. Options</h2>
-      <div className="options-grid">
-        <label>
-          Concurrency
-          <input type="number" min={1} max={10} value={options.concurrency} onChange={handleNumberChange('concurrency')} disabled={running} />
-        </label>
-        <label>
-          Retry Limit
-          <input type="number" min={1} max={10} value={options.retryLimit} onChange={handleNumberChange('retryLimit')} disabled={running} />
-        </label>
-        <label>
-          Dedupe Strategy
-          <select value={options.dedupeStrategy} onChange={handleSelect('dedupeStrategy')} disabled={running}>
-            <option value="move">Move to duplicates</option>
-            <option value="delete">Delete duplicates</option>
-            <option value="none">Leave duplicates</option>
-          </select>
-        </label>
-      </div>
-      <div className="toggle-row">
-        <label>
-          <input type="checkbox" checked={options.keepZipPayloads} onChange={handleToggle('keepZipPayloads')} disabled={running} /> Keep caption ZIP payloads
-        </label>
-        <label>
-          <input type="checkbox" checked={options.dryRun} onChange={handleToggle('dryRun')} disabled={running} /> Dry run (parse only)
-        </label>
-        <label>
-          <input type="checkbox" checked={options.verifyOnly} onChange={handleToggle('verifyOnly')} disabled={running} /> Verify outputs only
-        </label>
-      </div>
-    </section>
-  );
-
-  const renderRun = () => (
-    <section className="card">
-      <h2>4. Run Pipeline</h2>
-      <div className="run-controls">
-        <button className="primary" disabled={!canRun} onClick={runPipeline}>
-          {options.dryRun ? 'Start Dry Run' : 'Start Run'}
-        </button>
-        <button onClick={handlePause} disabled={!running || paused}>Pause</button>
-        <button onClick={handleResume} disabled={!running || !paused}>Resume</button>
-        <button onClick={handleDiagnostics} disabled={!summary}>Export Diagnostics</button>
-      </div>
-      {diagnosticsPath && <p className="diagnostics-note">Latest diagnostics bundle: {diagnosticsPath}</p>}
-      <h3>Stats {stats?.stage ? `(stage: ${stats.stage})` : ''}</h3>
-      {renderStats()}
-      <div className="log-panel">
-        {logs.length === 0 && <p className="muted">No activity yet.</p>}
-        {logs.map((entry, index) => (
-          <div key={`${entry.timestamp}-${index}`} className="log-line">
-            <span>{entry.timestamp}</span>
-            <span>{entry.message}</span>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[ 'Local-only processing', 'Deterministic pipeline', 'Full diagnostics bundle', 'Pause/resume safety' ].map((item) => (
+          <div key={item} className="rounded-xl border border-white/10 bg-slate-900/60 p-4 text-sm text-slate-200">
+            {item}
           </div>
         ))}
       </div>
     </section>
   );
 
+  const renderSelectExport = () => (
+    <section className="glass-card space-y-5">
+      <div className="space-y-2">
+        <h2 className="text-2xl font-semibold">1. Select the Snapchat Export ZIP</h2>
+        <p className="text-sm text-slate-300">The wizard reads <code className="font-mono">memories_history.json</code> (preferred) or the fallback HTML. Keep the file untouched so parsing stays deterministic.</p>
+      </div>
+      <div className="flex flex-col gap-3 lg:flex-row">
+        <div className="flex flex-1 items-center gap-2 rounded-xl border border-dashed border-white/15 bg-black/30 px-4 py-3 font-mono text-xs text-slate-200">
+          <span className="truncate">{exportZip || 'No file selected yet'}</span>
+        </div>
+        <button
+          data-tooltip="Browse to the downloaded Snapchat My Data ZIP."
+          className="rounded-xl bg-brand-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/25 transition hover:bg-brand-400 disabled:opacity-50"
+          onClick={handleChooseZip}
+          disabled={running}
+        >
+          Choose ZIP
+        </button>
+      </div>
+      <ul className="list-disc space-y-2 pl-5 text-sm text-slate-300">
+        <li>Confirm the ZIP still contains <code className="font-mono">memories_history.json</code> or <code className="font-mono">memories_history.html</code>.</li>
+        <li>Prefer the version that includes JSON so we can extract metadata without brittle scraping.</li>
+        <li>If you have multiple exports, run them sequentially to avoid link expiration.</li>
+      </ul>
+    </section>
+  );
+
+  const renderSelectOutput = () => (
+    <section className="glass-card space-y-5">
+      <div className="space-y-2">
+        <h2 className="text-2xl font-semibold">2. Choose an Output Folder</h2>
+        <p className="text-sm text-slate-300">Pick an empty directory where the cleaned media, duplicates folder, diagnostics, and run reports will be written.</p>
+      </div>
+      <div className="flex flex-col gap-3 lg:flex-row">
+        <div className="flex flex-1 items-center gap-2 rounded-xl border border-dashed border-white/15 bg-black/30 px-4 py-3 font-mono text-xs text-slate-200">
+          <span className="truncate">{outputDir || 'No destination selected yet'}</span>
+        </div>
+        <button
+          data-tooltip="Select a destination folder with ample free space."
+          className="rounded-xl bg-brand-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/25 transition hover:bg-brand-400 disabled:opacity-50"
+          onClick={handleChooseOutput}
+          disabled={running}
+        >
+          Choose Folder
+        </button>
+      </div>
+      <ul className="list-disc space-y-2 pl-5 text-sm text-slate-300">
+        <li>The app will create <code className="font-mono">memories</code>, <code className="font-mono">duplicates</code>, and <code className="font-mono">reports</code> inside this folder.</li>
+        <li>Avoid network drives; local SSD/HDD storage minimizes corruption risk.</li>
+        <li>Keep this folder dedicated to a single run to simplify verification.</li>
+      </ul>
+    </section>
+  );
+
+  const renderOptions = () => (
+    <section className="glass-card space-y-6">
+      <div className="space-y-2">
+        <h2 className="text-2xl font-semibold">3. Fine-tune the Pipeline</h2>
+        <p className="text-sm text-slate-300">Adjust performance and safety levers. Hover any field to learn what it controls.</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <label className="space-y-2 text-sm" data-tooltip="Number of simultaneous downloads. Lower values reduce network load.">
+          <span className="text-xs uppercase text-slate-400">Concurrency</span>
+          <input
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none transition focus:border-brand-400"
+            type="number"
+            min={1}
+            max={10}
+            value={options.concurrency}
+            onChange={handleNumberChange('concurrency')}
+            disabled={running}
+          />
+        </label>
+        <label className="space-y-2 text-sm" data-tooltip="Maximum retries per memory before we mark it failed.">
+          <span className="text-xs uppercase text-slate-400">Retry limit</span>
+          <input
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none transition focus:border-brand-400"
+            type="number"
+            min={1}
+            max={10}
+            value={options.retryLimit}
+            onChange={handleNumberChange('retryLimit')}
+            disabled={running}
+          />
+        </label>
+        <label className="space-y-2 text-sm" data-tooltip="Choose whether duplicates get moved aside, deleted, or kept in place.">
+          <span className="text-xs uppercase text-slate-400">Dedupe strategy</span>
+          <select
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none transition focus:border-brand-400"
+            value={options.dedupeStrategy}
+            onChange={handleSelect('dedupeStrategy')}
+            disabled={running}
+          >
+            <option value="move">Move to duplicates folder</option>
+            <option value="delete">Delete duplicates permanently</option>
+            <option value="none">Leave duplicates untouched</option>
+          </select>
+        </label>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Keep caption ZIP payloads for manual review instead of deleting them once merged.">
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-white/30 bg-black"
+            checked={options.keepZipPayloads}
+            onChange={handleToggle('keepZipPayloads')}
+            disabled={running}
+          />
+          <span>Keep caption ZIP payloads</span>
+        </label>
+        <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Run parsing and validation without downloading media.">
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-white/30 bg-black"
+            checked={options.dryRun}
+            onChange={handleToggle('dryRun')}
+            disabled={running}
+          />
+          <span>Dry run (parse only)</span>
+        </label>
+        <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Skip downloads and only verify that prior outputs still exist and match metadata.">
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-white/30 bg-black"
+            checked={options.verifyOnly}
+            onChange={handleToggle('verifyOnly')}
+            disabled={running}
+          />
+          <span>Verify outputs only</span>
+        </label>
+      </div>
+    </section>
+  );
+
+  const renderRun = () => (
+    <section className="glass-card space-y-5">
+      <div className="space-y-2">
+        <h2 className="text-2xl font-semibold">4. Run & Monitor</h2>
+        <p className="text-sm text-slate-300">Start the pipeline, then watch live stats, logs, and diagnostics. Hover controls for guidance.</p>
+      </div>
+      <div className="flex flex-wrap gap-3" role="group" aria-label="Pipeline controls">
+        <button
+          data-tooltip="Begin the configured pipeline. Disabled until a ZIP and output folder are selected."
+          className="rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 disabled:opacity-50"
+          disabled={!canRun}
+          onClick={runPipeline}
+        >
+          {options.dryRun ? 'Start Dry Run' : 'Start Run'}
+        </button>
+        <button
+          data-tooltip="Pause after the current safe checkpoint."
+          className="rounded-xl border border-white/15 bg-black/40 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40 disabled:opacity-50"
+          onClick={handlePause}
+          disabled={!running || paused}
+        >
+          Pause
+        </button>
+        <button
+          data-tooltip="Resume work after a pause."
+          className="rounded-xl border border-white/15 bg-black/40 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40 disabled:opacity-50"
+          onClick={handleResume}
+          disabled={!running || !paused}
+        >
+          Resume
+        </button>
+        <button
+          data-tooltip="Bundle logs, config, and the latest report for support."
+          className="rounded-xl border border-white/15 bg-black/40 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40 disabled:opacity-50"
+          onClick={handleDiagnostics}
+          disabled={!summary}
+        >
+          Export Diagnostics
+        </button>
+      </div>
+      {diagnosticsPath && (
+        <p className="text-xs text-slate-400">Latest diagnostics bundle: {diagnosticsPath}</p>
+      )}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-lg font-semibold text-white">Live Stats</h3>
+          <span className="text-xs uppercase tracking-wide text-slate-400">{stats?.stage ? `Stage: ${stats.stage}` : 'Stage: --'}</span>
+        </div>
+        {renderStats()}
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-white">Activity Log</h3>
+          <span className="text-xs text-slate-400">Most recent 200 entries</span>
+        </div>
+        <div className="log-panel" role="log" aria-live="polite">
+          {logs.length === 0 && <p className="text-slate-500">No activity yet.</p>}
+          {logs.map((entry, index) => (
+            <div key={`${entry.timestamp}-${index}`} className="log-line">
+              <span>{entry.timestamp}</span>
+              <span className="flex-1 text-right">{entry.message}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+
   const renderFinish = () => (
     summary && (
-      <section className="card">
-        <h2>5. Finish</h2>
-        <p>Archive ready! Share the diagnostics bundle with support if you need help.</p>
-        <div className="summary-grid">
-          <div>
-            <strong>Total</strong>
-            <span>{summary.total}</span>
-          </div>
-          <div>
-            <strong>Downloaded</strong>
-            <span>{summary.downloaded}</span>
-          </div>
-          <div>
-            <strong>Processed</strong>
-            <span>{summary.processed}</span>
-          </div>
-          <div>
-            <strong>Metadata</strong>
-            <span>{summary.metadataWritten}</span>
-          </div>
-          <div>
-            <strong>Deduped</strong>
-            <span>{summary.deduped}</span>
-          </div>
-          <div>
-            <strong>Failures</strong>
-            <span>{summary.failures}</span>
-          </div>
-          <div>
-            <strong>Duration</strong>
-            <span>{(summary.durationMs / 1000).toFixed(1)}s</span>
-          </div>
-          <div>
-            <strong>Report</strong>
-            <span>{summary.reportPath || 'Pending'}</span>
-          </div>
+      <section className="glass-card space-y-6">
+        <div className="space-y-2">
+          <h2 className="text-2xl font-semibold">5. Review & Export</h2>
+          <p className="text-sm text-slate-300">Everything completed. Inspect the summary, open the report, and capture diagnostics for your records.</p>
         </div>
-        <button className="primary" onClick={handleDiagnostics} disabled={!summary}>Export Diagnostics Bundle</button>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: 'Total', value: summary.total },
+            { label: 'Downloaded', value: summary.downloaded },
+            { label: 'Processed', value: summary.processed },
+            { label: 'Metadata Written', value: summary.metadataWritten },
+            { label: 'Deduped', value: summary.deduped },
+            { label: 'Failures', value: summary.failures },
+            { label: 'Duration (s)', value: (summary.durationMs / 1000).toFixed(1) },
+            { label: 'Report Path', value: summary.reportPath || 'Pending' }
+          ].map((item) => (
+            <div key={item.label} className="stat-card">
+              <p className="text-xs uppercase tracking-wide text-slate-400">{item.label}</p>
+              <p className="text-xl font-semibold text-white break-words">{item.value}</p>
+            </div>
+          ))}
+        </div>
+        <button
+          data-tooltip="Generate a fresh diagnostics bundle with logs and reports."
+          className="rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 disabled:opacity-50"
+          onClick={handleDiagnostics}
+          disabled={!summary}
+        >
+          Export Diagnostics Bundle
+        </button>
       </section>
     )
   );
@@ -384,34 +512,25 @@ const App = () => {
   };
 
   return (
-    <div className="app">
-      <header>
-        <div>
-          <h1>Snap Memories Backup</h1>
-          <p>Ingest your Snapchat export, repair media, and produce a verified archive.</p>
-        </div>
-        <div className="status">
-          <span className="badge">{paused ? 'Paused' : running ? 'Running' : 'Idle'}</span>
-          <small>Phase: {phase}</small>
-          <small>{lastMessage}</small>
-        </div>
-      </header>
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-10">
+        <header className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-2">
+            <p className="text-sm uppercase tracking-[0.3em] text-brand-300">Snap Memories Backup</p>
+            <h1 className="text-3xl font-semibold text-white">Guided ingest & verification wizard</h1>
+            <p className="text-sm text-slate-300">Ingest your Snapchat export, repair every memory, embed metadata, dedupe safely, and produce a verifiable archive.</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/40 p-4 text-right text-sm text-slate-200">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Pipeline state</p>
+            <p className="text-xl font-semibold text-white">{paused ? 'Paused' : running ? 'Running' : 'Idle'}</p>
+            <p>Phase: {phase}</p>
+            <p className="text-slate-400">{lastMessage || 'Waiting for next event...'}</p>
+          </div>
+        </header>
 
-      {renderStepper()}
-      {renderCurrentStep()}
-
-      {step >= 0 && step <= 3 && (
-        <div className="wizard-nav">
-          <button onClick={goBack} disabled={step === 0 || running}>Back</button>
-          <button onClick={goNext} disabled={!canAdvance(step) || running}>Next</button>
-        </div>
-      )}
-
-      {step === 5 && (
-        <div className="wizard-nav">
-          <button onClick={() => setStep(3)} disabled={running}>Configure Another Run</button>
-        </div>
-      )}
+        {renderStepper()}
+        {renderCurrentStep()}
+      </div>
     </div>
   );
 };
