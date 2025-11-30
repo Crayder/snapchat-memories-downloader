@@ -46,6 +46,17 @@ export interface PostProcessOptions {
 const VIDEO_EXTS = ['.mp4', '.mov', '.m4v'];
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.heic', '.gif', '.webp'];
 
+interface VideoStreamInfo {
+  width: number;
+  height: number;
+  codecName?: string;
+  bitRate?: number;
+  frameRate?: string;
+  pixFmt?: string;
+  profile?: string;
+  level?: number;
+}
+
 export class PostProcessService {
   constructor(private readonly options: PostProcessOptions, private readonly investigation?: InvestigationJournal) {}
 
@@ -121,9 +132,9 @@ export class PostProcessService {
       entry.mediaType = targetMediaType;
 
       if (targetMediaType === 'video') {
-        const videoDims = await this.getVideoDimensions(base);
-        const overlayAsset = overlays.length ? await this.mergeOverlays(overlays, videoDims) : undefined;
-        await this.overlayVideo(base, overlayAsset, entry, targetMediaType);
+        const videoInfo = await this.getVideoMetadata(base);
+        const overlayAsset = overlays.length ? await this.mergeOverlays(overlays, { width: videoInfo.width, height: videoInfo.height }) : undefined;
+        await this.overlayVideo(base, overlayAsset, entry, targetMediaType, videoInfo);
       } else {
         await this.composeImage(base, overlays, entry, targetMediaType);
       }
@@ -157,7 +168,13 @@ export class PostProcessService {
     entry.finalPath = finalPath;
   }
 
-  private async overlayVideo(basePath: string, overlayPath: string | undefined, entry: MemoryEntry, mediaType: MemoryMediaType = 'video'): Promise<void> {
+  private async overlayVideo(
+    basePath: string,
+    overlayPath: string | undefined,
+    entry: MemoryEntry,
+    mediaType: MemoryMediaType = 'video',
+    videoInfo?: VideoStreamInfo
+  ): Promise<void> {
     const finalName = buildOutputName(entry.capturedAtUtc, mediaType === 'image' ? 'image' : 'video', entry.index, path.extname(basePath) || '.mp4');
     const finalPath = path.join(this.options.outputDir, finalName);
 
@@ -167,11 +184,12 @@ export class PostProcessService {
       return;
     }
 
+    const encodingOptions = this.buildVideoEncodingOptions(videoInfo);
     await new Promise<void>((resolve, reject) => {
       ffmpeg(basePath)
         .input(overlayPath)
         .complexFilter(['[0:v][1:v]overlay=0:0:format=auto[vout]'])
-        .outputOptions(['-map', '[vout]', '-map', '0:a?', '-c:a', 'copy', '-c:v', 'libx264', '-crf', '18', '-preset', 'medium', '-movflags', '+faststart'])
+        .outputOptions(encodingOptions)
         .save(finalPath)
         .on('end', () => resolve())
         .on('error', (err) => reject(err));
@@ -201,7 +219,7 @@ export class PostProcessService {
     return tempFile;
   }
 
-  private async getVideoDimensions(videoPath: string): Promise<{ width: number; height: number }> {
+  private async getVideoMetadata(videoPath: string): Promise<VideoStreamInfo> {
     return new Promise((resolve, reject) => {
       ffmpeg.ffprobe(videoPath, (error: Error | null, metadata: FfprobeData) => {
         if (error) {
@@ -209,14 +227,108 @@ export class PostProcessService {
           reject(error);
           return;
         }
-        const stream = metadata.streams?.find((s) => s.width && s.height);
+        const stream = metadata.streams?.find((s) => s.codec_type === 'video' && s.width && s.height);
         if (!stream?.width || !stream?.height) {
           reject(new Error('Unable to read video dimensions.'));
           return;
         }
-        resolve({ width: stream.width, height: stream.height });
+        const bitRate = Number(stream.bit_rate ?? metadata.format?.bit_rate ?? 0) || undefined;
+        const fps = this.parseFrameRate(stream.avg_frame_rate);
+        const rawProfile = stream.profile as string | number | undefined;
+        const normalizedProfile = typeof rawProfile === 'number' ? rawProfile.toString() : rawProfile;
+        const rawLevel = stream.level as number | string | undefined;
+        const parsedLevel = typeof rawLevel === 'string' ? Number(rawLevel) : rawLevel;
+        const normalizedLevel = typeof parsedLevel === 'number' && Number.isFinite(parsedLevel) ? parsedLevel : undefined;
+        resolve({
+          width: stream.width,
+          height: stream.height,
+          codecName: stream.codec_name ?? undefined,
+          bitRate,
+          frameRate: fps,
+          pixFmt: stream.pix_fmt ?? undefined,
+          profile: normalizedProfile ?? undefined,
+          level: normalizedLevel
+        });
       });
     });
+  }
+
+  private buildVideoEncodingOptions(info?: VideoStreamInfo): string[] {
+    const codec = (info?.codecName ?? 'h264').toLowerCase();
+    const encoder = codec.includes('265') || codec.includes('hevc') ? 'libx265' : 'libx264';
+    const options = ['-map', '[vout]', '-map', '0:a?', '-c:a', 'copy', '-c:v', encoder];
+
+    if (info?.bitRate) {
+      const kbps = Math.max(1, Math.round(info.bitRate / 1000));
+      options.push('-b:v', `${kbps}k`, '-maxrate', `${kbps}k`, '-bufsize', `${Math.max(kbps * 2, 1000)}k`);
+    } else {
+      options.push('-crf', '18');
+    }
+
+    if (info?.frameRate) {
+      options.push('-r', info.frameRate);
+    }
+
+    const pixFmt = this.normalizePixelFormat(info?.pixFmt);
+    options.push('-pix_fmt', pixFmt);
+
+    if (encoder === 'libx264') {
+      const profile = this.normalizeProfile(info?.profile);
+      if (profile) {
+        options.push('-profile:v', profile);
+      }
+      const level = this.normalizeLevel(info?.level);
+      if (level) {
+        options.push('-level', level);
+      }
+    }
+
+    options.push('-preset', 'medium', '-movflags', '+faststart');
+    return options;
+  }
+
+  private normalizePixelFormat(pixFmt?: string): string {
+    if (!pixFmt) {
+      return 'yuv420p';
+    }
+    if (pixFmt === 'yuvj420p') {
+      return 'yuv420p';
+    }
+    if (!pixFmt.startsWith('yuv')) {
+      return 'yuv420p';
+    }
+    return pixFmt;
+  }
+
+  private normalizeProfile(profile?: string): string | undefined {
+    if (!profile) {
+      return undefined;
+    }
+    return profile.toLowerCase().replace(/\s+/g, '-');
+  }
+
+  private normalizeLevel(level?: number): string | undefined {
+    if (!level) {
+      return undefined;
+    }
+    if (level >= 10) {
+      return (level / 10).toFixed(1);
+    }
+    return level.toFixed(1);
+  }
+
+  private parseFrameRate(rate?: string): string | undefined {
+    if (!rate || rate === '0/0') {
+      return undefined;
+    }
+    if (!rate.includes('/')) {
+      return rate;
+    }
+    const [num, den] = rate.split('/').map((value) => Number(value));
+    if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
+      return undefined;
+    }
+    return (num / den).toFixed(3);
   }
 
   private async listFiles(root: string): Promise<string[]> {
