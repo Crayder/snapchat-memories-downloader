@@ -39,7 +39,6 @@ export interface PipelineOptions {
   throttleDelayMs: number;
   attemptTimeoutMs: number;
   cleanupDownloads: boolean;
-  batchPauseCount: number;
   retryFailedOnly?: boolean;
   dedupeStrategy: 'move' | 'delete' | 'none';
   dryRun: boolean;

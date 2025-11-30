@@ -5,12 +5,11 @@ import type { PipelineProgressEvent } from '../../shared/ipc.js';
 import type { PipelineStatsPayload } from '../../shared/types/pipeline-stats.js';
 
 const DEFAULT_OPTIONS: PipelineRunRequest['options'] = {
-  concurrency: 4,
+  concurrency: 3,
   retryLimit: 3,
-  throttleDelayMs: 0,
+  throttleDelayMs: 500,
   attemptTimeoutMs: 15000,
-  cleanupDownloads: false,
-  batchPauseCount: 0,
+  cleanupDownloads: true,
   retryFailedOnly: false,
   dedupeStrategy: 'move',
   dryRun: false,
@@ -36,11 +35,11 @@ const STEPS = [
   },
   {
     title: 'Run',
-    description: 'Monitor downloads, pause/resume safely, and capture diagnostics while processing.'
+    description: 'Monitor downloads, pause/resume safely, and inspect live stats while processing.'
   },
   {
     title: 'Finish',
-    description: 'Review the summary, open reports, and export diagnostics for support if needed.'
+    description: 'Review the summary, open reports, and wrap up the run.'
   }
 ];
 
@@ -77,21 +76,14 @@ const App = () => {
   const [phase, setPhase] = useState<string>('idle');
   const [lastMessage, setLastMessage] = useState<string>('');
   const [stats, setStats] = useState<PipelineStatsPayload | null>(null);
-  const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null);
-  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [reportCopyMessage, setReportCopyMessage] = useState<string>('');
   const [autoPauseOnError, setAutoPauseOnError] = useState(true);
-  const [batchPauseEnabled, setBatchPauseEnabled] = useState(DEFAULT_OPTIONS.batchPauseCount > 0);
-  const [batchOperationCount, setBatchOperationCount] = useState(0);
   const [retryFailuresOnly, setRetryFailuresOnly] = useState(false);
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const batchOperationRef = useRef(0);
   const autoPauseLockRef = useRef(false);
   const runningRef = useRef(running);
   const pausedRef = useRef(paused);
   const autoPauseOnErrorRef = useRef(autoPauseOnError);
-  const batchPauseEnabledRef = useRef(batchPauseEnabled);
-  const batchSizeRef = useRef(options.batchPauseCount);
   const handlePauseRef = useRef<(() => Promise<void>) | null>(null);
 
   const pushLog = useCallback((message: string) => {
@@ -106,8 +98,6 @@ const App = () => {
       autoPauseLockRef.current = true;
       handlePauseRef.current()
         .then(() => {
-          batchOperationRef.current = 0;
-          setBatchOperationCount(0);
           pushLog(reason);
         })
         .finally(() => {
@@ -116,20 +106,6 @@ const App = () => {
     };
 
     const dispose = window.electronAPI.onProgress((event: PipelineProgressEvent) => {
-      if (event.type === 'entry-status') {
-        batchOperationRef.current += 1;
-        setBatchOperationCount(batchOperationRef.current);
-        if (
-          batchPauseEnabledRef.current &&
-          batchSizeRef.current > 0 &&
-          batchOperationRef.current >= batchSizeRef.current &&
-          runningRef.current &&
-          !pausedRef.current
-        ) {
-          requestAutoPause(`Auto-paused after ${batchSizeRef.current} operations.`);
-        }
-      }
-
       if (event.type === 'error') {
         pushLog(`Error: ${event.message ?? 'Unknown error'}`);
         if (autoPauseOnErrorRef.current && runningRef.current && !pausedRef.current) {
@@ -183,24 +159,6 @@ const App = () => {
     autoPauseOnErrorRef.current = autoPauseOnError;
   }, [autoPauseOnError]);
 
-  useEffect(() => {
-    batchPauseEnabledRef.current = batchPauseEnabled;
-  }, [batchPauseEnabled]);
-
-  useEffect(() => {
-    batchSizeRef.current = options.batchPauseCount;
-    if (!running) {
-      setBatchPauseEnabled(options.batchPauseCount > 0);
-    }
-  }, [options.batchPauseCount, running]);
-
-  useEffect(() => {
-    if (!running) {
-      batchOperationRef.current = 0;
-      setBatchOperationCount(0);
-    }
-  }, [running, paused]);
-
   const canRun = useMemo(() => exportZip && outputDir && !running, [exportZip, outputDir, running]);
 
   const handleChooseZip = async () => {
@@ -232,7 +190,7 @@ const App = () => {
   };
 
   const handleNumberChange = (
-    key: 'concurrency' | 'retryLimit' | 'throttleDelayMs' | 'attemptTimeoutMs' | 'batchPauseCount',
+    key: 'concurrency' | 'retryLimit' | 'throttleDelayMs' | 'attemptTimeoutMs',
     multiplier = 1
   ) => (event: ChangeEvent<HTMLInputElement>) => {
     const raw = Number(event.target.value);
@@ -248,12 +206,8 @@ const App = () => {
     setLogs([]);
     setSummary(null);
     setStats(null);
-    setDiagnosticsPath(null);
     setPhase('initializing');
     setStep(4);
-    batchOperationRef.current = 0;
-    setBatchOperationCount(0);
-    setBatchPauseEnabled(options.batchPauseCount > 0);
     const payload: PipelineRunRequest = {
       exportZipPath: exportZip,
       outputDir,
@@ -287,19 +241,6 @@ const App = () => {
     handlePauseRef.current = handlePause;
   }, [handlePause]);
 
-  const handleDiagnostics = async () => {
-    try {
-      setDiagnosticsBusy(true);
-      const result = await window.electronAPI.exportDiagnostics();
-      setDiagnosticsPath(result.path);
-      pushLog(`Diagnostics bundle created: ${result.path}`);
-    } catch (error) {
-      pushLog(`Diagnostics export failed: ${(error as Error).message}`);
-    } finally {
-      setDiagnosticsBusy(false);
-    }
-  };
-
   const handleCopyReportPath = async () => {
     if (!summary?.reportPath) return;
     try {
@@ -324,8 +265,6 @@ const App = () => {
     pushLog('Returned to Run step to retry failures. Start the run again to resume.');
     setStep(4);
     setRetryFailuresOnly(true);
-    batchOperationRef.current = 0;
-    setBatchOperationCount(0);
   };
 
   const handleRestartWizard = () => {
@@ -335,7 +274,6 @@ const App = () => {
     setLogs([]);
     setSummary(null);
     setStats(null);
-    setDiagnosticsPath(null);
     setRunning(false);
     setPaused(false);
     setPhase('idle');
@@ -447,7 +385,7 @@ const App = () => {
         <li>Have enough disk space for both the working set and the finalized archive (roughly 2× your export size).</li>
       </ul>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[ 'Local-only processing', 'Deterministic pipeline', 'Full diagnostics bundle', 'Pause/resume safety' ].map((item) => (
+        {[ 'Local-only processing', 'Deterministic pipeline', 'Detailed run reports', 'Pause/resume safety' ].map((item) => (
           <div key={item} className="rounded-xl border border-white/10 bg-slate-900/60 p-4 text-sm text-slate-200">
             {item}
           </div>
@@ -487,7 +425,7 @@ const App = () => {
     <section className="glass-card space-y-5">
       <div className="space-y-2">
         <h2 className="text-2xl font-semibold">2. Choose an Output Folder</h2>
-        <p className="text-sm text-slate-300">Pick an empty directory where the cleaned media, duplicates folder, diagnostics, and run reports will be written.</p>
+        <p className="text-sm text-slate-300">Pick an empty directory where the cleaned media, duplicates folder, and run reports will be written.</p>
       </div>
       <div className="flex flex-col gap-3 lg:flex-row">
         <div className="flex flex-1 items-center gap-2 rounded-xl border border-dashed border-white/15 bg-black/30 px-4 py-3 font-mono text-xs text-slate-200">
@@ -584,19 +522,6 @@ const App = () => {
       <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
         Snapchat can rate limit aggressively if concurrency is high and no delay is used. Start with a 250-500 ms delay and increase slowly once the export flows reliably; keep the timeout under a minute so individual memories do not stall the queue indefinitely.
       </div>
-      <label className="space-y-2 text-sm" data-tooltip="Automatically pause after this many entry operations (0 disables). Keeps runs bite-sized for manual review.">
-        <span className="text-xs uppercase text-slate-400">Auto-pause batch size</span>
-        <input
-          className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none transition focus:border-brand-400"
-          type="number"
-          min={0}
-          step={5}
-          value={options.batchPauseCount}
-          onChange={handleNumberChange('batchPauseCount')}
-          disabled={running}
-        />
-        <span className="block text-xs text-slate-500">Set to 0 to keep running continuously. You can still toggle the batch pauser on the Run tab.</span>
-      </label>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Run parsing and validation without downloading media.">
           <input
@@ -636,7 +561,7 @@ const App = () => {
     <section className="glass-card space-y-5">
       <div className="space-y-2">
         <h2 className="text-2xl font-semibold">4. Run & Monitor</h2>
-        <p className="text-sm text-slate-300">Start the pipeline, then watch live stats, logs, and diagnostics. Hover controls for guidance.</p>
+        <p className="text-sm text-slate-300">Start the pipeline, then watch live stats, logs, and activity feeds. Hover controls for guidance.</p>
       </div>
       <div className="flex flex-wrap gap-3" role="group" aria-label="Pipeline controls">
         <button
@@ -663,20 +588,7 @@ const App = () => {
         >
           Resume
         </button>
-        <button
-          data-tooltip="Bundle logs, config, and the latest report for support."
-          className="rounded-xl border border-white/15 bg-black/40 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40 disabled:opacity-50"
-          onClick={handleDiagnostics}
-          disabled={!summary || diagnosticsBusy}
-        >
-          {diagnosticsBusy ? 'Exporting…' : 'Export Diagnostics'}
-        </button>
       </div>
-      {(diagnosticsBusy || diagnosticsPath) && (
-        <p className="text-xs text-slate-400">
-          {diagnosticsBusy ? 'Preparing diagnostics bundle…' : `Latest diagnostics bundle: ${diagnosticsPath}`}
-        </p>
-      )}
       <div className="flex flex-wrap gap-4 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-slate-200">
         <label className="flex items-center gap-2">
           <input
@@ -687,22 +599,6 @@ const App = () => {
           />
           <span>Auto-pause on errors</span>
         </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-white/30 bg-black"
-            checked={batchPauseEnabled && options.batchPauseCount > 0}
-            onChange={(event) => setBatchPauseEnabled(event.target.checked)}
-            disabled={options.batchPauseCount === 0}
-          />
-          <span>
-            Pause every {options.batchPauseCount || '—'} operations
-            <span className="ml-2 text-xs text-slate-400">(current batch: {batchOperationCount})</span>
-          </span>
-        </label>
-        {options.batchPauseCount === 0 && (
-          <p className="text-xs text-slate-400">Set a batch size above zero in Options to enable batch pauses.</p>
-        )}
       </div>
       {retryFailuresOnly && (
         <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
@@ -744,7 +640,7 @@ const App = () => {
         <section className="glass-card space-y-6">
           <div className="space-y-2">
             <h2 className="text-2xl font-semibold">5. Review & Export</h2>
-            <p className="text-sm text-slate-300">Everything completed. Inspect the summary, open the report, and capture diagnostics for your records.</p>
+            <p className="text-sm text-slate-300">Everything completed. Inspect the summary, open the report, and wrap up the run.</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/35 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Failure breakdown</p>
@@ -763,7 +659,7 @@ const App = () => {
               ))}
             </div>
             {nonDownloadFailures > 0 && (
-              <p className="mt-2 text-xs text-amber-200">Most non-download failures point to caption ZIP or metadata issues. Inspect the diagnostics bundle or the <code className="font-mono">_zip_failures</code> folder inside your output directory to review captured artifacts.</p>
+              <p className="mt-2 text-xs text-amber-200">Most non-download failures point to caption ZIP or metadata issues. Inspect the <code className="font-mono">_zip_failures</code> folder inside your output directory and the run logs to review captured artifacts.</p>
             )}
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -786,7 +682,7 @@ const App = () => {
           <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-slate-200 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Report path</p>
-              <p className="font-mono text-xs text-white">{summary.reportPath || 'Report will be written once the diagnostics bundle finishes.'}</p>
+                <p className="font-mono text-xs text-white">{summary.reportPath || 'Report path will appear once the run finishes.'}</p>
             </div>
             <div className="flex items-center gap-3">
               {reportCopyMessage && <span className="text-xs text-emerald-300">{reportCopyMessage}</span>}
@@ -802,14 +698,6 @@ const App = () => {
           </div>
           <div className="flex flex-wrap gap-3">
             <button
-              data-tooltip="Generate a fresh diagnostics bundle with logs and reports."
-              className="rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 disabled:opacity-50"
-              onClick={handleDiagnostics}
-              disabled={!summary || diagnosticsBusy}
-            >
-              {diagnosticsBusy ? 'Exporting…' : 'Export Diagnostics Bundle'}
-            </button>
-            <button
               data-tooltip="Open the output folder that contains memories, duplicates, and reports."
               className="rounded-xl border border-white/15 bg-black/40 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40 disabled:opacity-50"
               onClick={handleOpenOutputFolder}
@@ -818,11 +706,6 @@ const App = () => {
               Open output folder
             </button>
           </div>
-          {(diagnosticsBusy || diagnosticsPath) && (
-            <p className="text-xs text-slate-400">
-              {diagnosticsBusy ? 'Preparing diagnostics bundle…' : `Latest diagnostics bundle: ${diagnosticsPath}`}
-            </p>
-          )}
           <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-slate-200 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Next actions</p>
