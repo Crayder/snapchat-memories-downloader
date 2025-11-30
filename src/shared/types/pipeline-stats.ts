@@ -10,4 +10,5 @@ export interface PipelineStatsPayload {
   videos: number;
   withGps: number;
   withoutGps: number;
+  reattempts: number;
 }

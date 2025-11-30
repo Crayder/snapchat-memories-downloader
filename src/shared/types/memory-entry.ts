@@ -33,6 +33,8 @@ export interface MemoryEntry {
 export interface PipelineOptions {
   concurrency: number;
   retryLimit: number;
+  throttleDelayMs: number;
+  attemptTimeoutMs: number;
   keepZipPayloads: boolean;
   dedupeStrategy: 'move' | 'delete' | 'none';
   dryRun: boolean;
@@ -54,6 +56,7 @@ export interface PipelineRunSummary {
   metadataWritten: number;
   deduped: number;
   failures: number;
+  reattempts: number;
   durationMs: number;
   reportPath: string;
 }

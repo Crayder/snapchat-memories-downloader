@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import type { PipelineRunRequest, PipelineRunSummary } from '../../shared/types/memory-entry.js';
 import type { PipelineProgressEvent } from '../../shared/ipc.js';
@@ -7,6 +7,8 @@ import type { PipelineStatsPayload } from '../../shared/types/pipeline-stats.js'
 const DEFAULT_OPTIONS: PipelineRunRequest['options'] = {
   concurrency: 4,
   retryLimit: 3,
+  throttleDelayMs: 0,
+  attemptTimeoutMs: 15000,
   keepZipPayloads: false,
   dedupeStrategy: 'move',
   dryRun: false,
@@ -40,6 +42,14 @@ const STEPS = [
   }
 ];
 
+const cascadeSummaryCounts = (data: PipelineRunSummary) => {
+  const deduped = data.deduped ?? 0;
+  const metadataWritten = Math.max(data.metadataWritten ?? 0, deduped);
+  const processed = Math.max(data.processed ?? 0, metadataWritten);
+  const downloaded = Math.max(data.downloaded ?? 0, processed);
+  return { ...data, downloaded, processed, metadataWritten };
+};
+
 type LogEntry = {
   timestamp: string;
   message: string;
@@ -58,6 +68,9 @@ const App = () => {
   const [lastMessage, setLastMessage] = useState<string>('');
   const [stats, setStats] = useState<PipelineStatsPayload | null>(null);
   const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null);
+  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const [reportCopyMessage, setReportCopyMessage] = useState<string>('');
+  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pushLog = useCallback((message: string) => {
     setLogs((current) => [{ timestamp: new Date().toLocaleTimeString(), message }, ...current].slice(0, 200));
@@ -96,6 +109,12 @@ const App = () => {
     return () => dispose();
   }, [pushLog]);
 
+  useEffect(() => () => {
+    if (copyResetRef.current) {
+      clearTimeout(copyResetRef.current);
+    }
+  }, []);
+
   const canRun = useMemo(() => exportZip && outputDir && !running, [exportZip, outputDir, running]);
 
   const handleChooseZip = async () => {
@@ -126,9 +145,14 @@ const App = () => {
     setOptions((prev) => ({ ...prev, [key]: event.target.value as typeof prev.dedupeStrategy }));
   };
 
-  const handleNumberChange = (key: 'concurrency' | 'retryLimit') => (event: ChangeEvent<HTMLInputElement>) => {
-    const value = Number(event.target.value);
-    setOptions((prev) => ({ ...prev, [key]: Number.isNaN(value) ? prev[key] : value }));
+  const handleNumberChange = (
+    key: 'concurrency' | 'retryLimit' | 'throttleDelayMs' | 'attemptTimeoutMs',
+    multiplier = 1
+  ) => (event: ChangeEvent<HTMLInputElement>) => {
+    const raw = Number(event.target.value);
+    if (Number.isNaN(raw)) return;
+    const value = Math.max(0, raw * multiplier);
+    setOptions((prev) => ({ ...prev, [key]: value }));
   };
 
   const runPipeline = async () => {
@@ -171,12 +195,60 @@ const App = () => {
 
   const handleDiagnostics = async () => {
     try {
+      setDiagnosticsBusy(true);
       const result = await window.electronAPI.exportDiagnostics();
       setDiagnosticsPath(result.path);
       pushLog(`Diagnostics bundle created: ${result.path}`);
     } catch (error) {
       pushLog(`Diagnostics export failed: ${(error as Error).message}`);
+    } finally {
+      setDiagnosticsBusy(false);
     }
+  };
+
+  const handleCopyReportPath = async () => {
+    if (!summary?.reportPath) return;
+    try {
+      await navigator.clipboard.writeText(summary.reportPath);
+      setReportCopyMessage('Copied report path to clipboard');
+    } catch (error) {
+      setReportCopyMessage('Copy failed. See logs for detail.');
+      pushLog(`Copy failed: ${(error as Error).message}`);
+    } finally {
+      if (copyResetRef.current) {
+        clearTimeout(copyResetRef.current);
+      }
+      copyResetRef.current = setTimeout(() => setReportCopyMessage(''), 2500);
+    }
+  };
+
+  const handleRetryFailures = () => {
+    setRunning(false);
+    setPaused(false);
+    setPhase('idle');
+    setLastMessage('Ready to retry failed memories.');
+    pushLog('Returned to Run step to retry failures. Start the run again to resume.');
+    setStep(4);
+  };
+
+  const handleRestartWizard = () => {
+    setExportZip('');
+    setOutputDir('');
+    setOptions({ ...DEFAULT_OPTIONS });
+    setLogs([]);
+    setSummary(null);
+    setStats(null);
+    setDiagnosticsPath(null);
+    setRunning(false);
+    setPaused(false);
+    setPhase('idle');
+    setLastMessage('Wizard reset. Select your export to begin.');
+    pushLog('Wizard reset to step 0.');
+    setStep(0);
+  };
+
+  const handleExitApp = () => {
+    window.close();
   };
 
   const canAdvanceFrom = (current: number): boolean => {
@@ -206,7 +278,8 @@ const App = () => {
       { label: 'Processed', value: stats?.processed ?? 0 },
       { label: 'Metadata', value: stats?.metadataWritten ?? 0 },
       { label: 'Deduped', value: stats?.deduped ?? 0 },
-      { label: 'Failures', value: stats?.failures ?? 0 }
+      { label: 'Failures', value: stats?.failures ?? 0 },
+      { label: 'Reattempts', value: stats?.reattempts ?? 0 }
     ];
 
     return (
@@ -370,6 +443,35 @@ const App = () => {
           </select>
         </label>
       </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-2 text-sm" data-tooltip="Wait this long before another batch of downloads is released. Helps respect Snapchat rate limits.">
+          <span className="text-xs uppercase text-slate-400">Inter-request delay (ms)</span>
+          <input
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none transition focus:border-brand-400"
+            type="number"
+            min={0}
+            step={50}
+            value={options.throttleDelayMs}
+            onChange={handleNumberChange('throttleDelayMs')}
+            disabled={running}
+          />
+        </label>
+        <label className="space-y-2 text-sm" data-tooltip="Abort an individual download if it takes longer than this number of seconds.">
+          <span className="text-xs uppercase text-slate-400">Attempt timeout (seconds)</span>
+          <input
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none transition focus:border-brand-400"
+            type="number"
+            min={5}
+            step={5}
+            value={Math.round(options.attemptTimeoutMs / 1000)}
+            onChange={handleNumberChange('attemptTimeoutMs', 1000)}
+            disabled={running}
+          />
+        </label>
+      </div>
+      <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+        Snapchat can rate limit aggressively if concurrency is high and no delay is used. Start with a 250-500 ms delay and increase slowly once the export flows reliably; keep the timeout under a minute so individual memories do not stall the queue indefinitely.
+      </div>
       <div className="grid gap-3 md:grid-cols-3">
         <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Keep caption ZIP payloads for manual review instead of deleting them once merged.">
           <input
@@ -440,13 +542,15 @@ const App = () => {
           data-tooltip="Bundle logs, config, and the latest report for support."
           className="rounded-xl border border-white/15 bg-black/40 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40 disabled:opacity-50"
           onClick={handleDiagnostics}
-          disabled={!summary}
+          disabled={!summary || diagnosticsBusy}
         >
-          Export Diagnostics
+          {diagnosticsBusy ? 'Exporting…' : 'Export Diagnostics'}
         </button>
       </div>
-      {diagnosticsPath && (
-        <p className="text-xs text-slate-400">Latest diagnostics bundle: {diagnosticsPath}</p>
+      {(diagnosticsBusy || diagnosticsPath) && (
+        <p className="text-xs text-slate-400">
+          {diagnosticsBusy ? 'Preparing diagnostics bundle…' : `Latest diagnostics bundle: ${diagnosticsPath}`}
+        </p>
       )}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -474,39 +578,96 @@ const App = () => {
   );
 
   const renderFinish = () => (
-    summary && (
-      <section className="glass-card space-y-6">
-        <div className="space-y-2">
-          <h2 className="text-2xl font-semibold">5. Review & Export</h2>
-          <p className="text-sm text-slate-300">Everything completed. Inspect the summary, open the report, and capture diagnostics for your records.</p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { label: 'Total', value: summary.total },
-            { label: 'Downloaded', value: summary.downloaded },
-            { label: 'Processed', value: summary.processed },
-            { label: 'Metadata Written', value: summary.metadataWritten },
-            { label: 'Deduped', value: summary.deduped },
-            { label: 'Failures', value: summary.failures },
-            { label: 'Duration (s)', value: (summary.durationMs / 1000).toFixed(1) },
-            { label: 'Report Path', value: summary.reportPath || 'Pending' }
-          ].map((item) => (
-            <div key={item.label} className="stat-card">
-              <p className="text-xs uppercase tracking-wide text-slate-400">{item.label}</p>
-              <p className="text-xl font-semibold text-white break-words">{item.value}</p>
+    summary && (() => {
+      const cascaded = cascadeSummaryCounts(summary);
+      const durationSeconds = (summary.durationMs / 1000).toFixed(1);
+      return (
+        <section className="glass-card space-y-6">
+          <div className="space-y-2">
+            <h2 className="text-2xl font-semibold">5. Review & Export</h2>
+            <p className="text-sm text-slate-300">Everything completed. Inspect the summary, open the report, and capture diagnostics for your records.</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: 'Total', value: cascaded.total },
+              { label: 'Downloaded', value: cascaded.downloaded },
+              { label: 'Processed', value: cascaded.processed },
+              { label: 'Metadata Written', value: cascaded.metadataWritten },
+              { label: 'Deduped', value: cascaded.deduped },
+              { label: 'Failures', value: cascaded.failures },
+              { label: 'Reattempts', value: cascaded.reattempts ?? 0 },
+              { label: 'Duration (s)', value: durationSeconds }
+            ].map((item) => (
+              <div key={item.label} className="stat-card">
+                <p className="text-xs uppercase tracking-wide text-slate-400">{item.label}</p>
+                <p className="break-words text-xl font-semibold text-white">{item.value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-slate-200 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Report path</p>
+              <p className="font-mono text-xs text-white">{summary.reportPath || 'Report will be written once the diagnostics bundle finishes.'}</p>
             </div>
-          ))}
-        </div>
-        <button
-          data-tooltip="Generate a fresh diagnostics bundle with logs and reports."
-          className="rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 disabled:opacity-50"
-          onClick={handleDiagnostics}
-          disabled={!summary}
-        >
-          Export Diagnostics Bundle
-        </button>
-      </section>
-    )
+            <div className="flex items-center gap-3">
+              {reportCopyMessage && <span className="text-xs text-emerald-300">{reportCopyMessage}</span>}
+              <button
+                data-tooltip="Copy the JSON report path so you can share it or open it later."
+                className="rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/50 disabled:opacity-40"
+                onClick={handleCopyReportPath}
+                disabled={!summary.reportPath}
+              >
+                Copy path
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <button
+              data-tooltip="Generate a fresh diagnostics bundle with logs and reports."
+              className="rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 disabled:opacity-50"
+              onClick={handleDiagnostics}
+              disabled={!summary || diagnosticsBusy}
+            >
+              {diagnosticsBusy ? 'Exporting…' : 'Export Diagnostics Bundle'}
+            </button>
+          </div>
+          {(diagnosticsBusy || diagnosticsPath) && (
+            <p className="text-xs text-slate-400">
+              {diagnosticsBusy ? 'Preparing diagnostics bundle…' : `Latest diagnostics bundle: ${diagnosticsPath}`}
+            </p>
+          )}
+          <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-slate-200 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Next actions</p>
+              <p>Retry failed memories, reset the wizard, or close the app.</p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                data-tooltip="Return to the Run step and reprocess any failures while keeping existing selections."
+                className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/40"
+                onClick={handleRetryFailures}
+              >
+                Retry failures
+              </button>
+              <button
+                data-tooltip="Clear selections and start the wizard over from step one."
+                className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/40"
+                onClick={handleRestartWizard}
+              >
+                Start over
+              </button>
+              <button
+                data-tooltip="Close the application."
+                className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/40"
+                onClick={handleExitApp}
+              >
+                Exit
+              </button>
+            </div>
+          </div>
+        </section>
+      );
+    })()
   );
 
   const renderCurrentStep = () => {

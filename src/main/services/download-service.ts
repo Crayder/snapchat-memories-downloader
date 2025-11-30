@@ -20,6 +20,8 @@ export interface DownloadServiceOptions {
   tempDir: string;
   concurrency: number;
   retryLimit: number;
+  throttleDelayMs: number;
+  attemptTimeoutMs: number;
 }
 
 export class DownloadService {
@@ -78,6 +80,7 @@ export class DownloadService {
     if (persisted?.downloadStatus === 'downloaded' && persisted.downloadedPath && (await fs.pathExists(persisted.downloadedPath))) {
       entry.downloadStatus = 'downloaded';
       entry.downloadedPath = persisted.downloadedPath;
+      entry.attempts = persisted.attempts;
       progress({ type: 'entry', entry, message: 'Already downloaded (resume)' });
       return entry;
     }
@@ -88,14 +91,19 @@ export class DownloadService {
         const finalPath = await this.fetchAndWrite(entry);
         entry.downloadStatus = 'downloaded';
         entry.downloadedPath = finalPath;
+        entry.attempts = attempt;
         this.state.upsert({ index: entry.index, downloadStatus: 'downloaded', downloadedPath: finalPath, attempts: attempt });
         progress({ type: 'entry', entry, message: 'Downloaded' });
+        if (this.options.throttleDelayMs > 0) {
+          await this.delay(this.options.throttleDelayMs);
+        }
         return entry;
       } catch (error) {
         log.error('Download failed for %s: %s', entry.downloadUrl, (error as Error).message);
         entry.errors = [...(entry.errors ?? []), (error as Error).message];
         if (attempt >= this.options.retryLimit) {
           entry.downloadStatus = 'failed';
+          entry.attempts = attempt;
           this.state.upsert({ index: entry.index, downloadStatus: 'failed', errors: entry.errors, attempts: attempt });
           throw error;
         }
@@ -110,12 +118,24 @@ export class DownloadService {
 
   private async fetchAndWrite(entry: MemoryEntry): Promise<string> {
     const downloadUrl = await this.resolveUrl(entry);
-    const response = await fetch(downloadUrl, {
-      method: 'GET',
-      headers: {
-        'X-Snap-Route-Tag': 'mem-dmd'
+    const controller = new AbortController();
+    const timeout = Number.isFinite(this.options.attemptTimeoutMs) && this.options.attemptTimeoutMs > 0
+      ? setTimeout(() => controller.abort(), this.options.attemptTimeoutMs)
+      : null;
+    let response: Response;
+    try {
+      response = await fetch(downloadUrl, {
+        method: 'GET',
+        headers: {
+          'X-Snap-Route-Tag': 'mem-dmd'
+        },
+        signal: controller.signal
+      });
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
       }
-    });
+    }
 
     if (!response.ok || !response.body) {
       throw new Error(`Unexpected response status ${response.status}`);

@@ -76,7 +76,9 @@ export class PipelineRunner {
             downloadDir,
             tempDir,
             concurrency: request.options.concurrency,
-            retryLimit: request.options.retryLimit
+            retryLimit: request.options.retryLimit,
+            throttleDelayMs: request.options.throttleDelayMs,
+            attemptTimeoutMs: request.options.attemptTimeoutMs
           },
           stateStore,
           this.control,
@@ -136,6 +138,12 @@ export class PipelineRunner {
     const metadata = entries.filter((e) => e.downloadStatus === 'metadata').length;
     const deduped = entries.filter((e) => e.downloadStatus === 'deduped').length;
     const failures = entries.filter((e) => e.downloadStatus === 'failed').length;
+    const reattempts = entries.reduce((sum, entry) => {
+      if (!entry.attempts || entry.attempts <= 1) {
+        return sum;
+      }
+      return sum + (entry.attempts - 1);
+    }, 0);
 
     return {
       startedAt: startedAt.toISOString(),
@@ -146,6 +154,7 @@ export class PipelineRunner {
       metadataWritten: metadata,
       deduped,
       failures,
+      reattempts,
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       reportPath: ''
     };
@@ -191,7 +200,13 @@ export class PipelineRunner {
       images: entries.filter((e) => e.mediaType === 'image').length,
       videos: entries.filter((e) => e.mediaType === 'video').length,
       withGps: entries.filter((e) => e.hasGps).length,
-      withoutGps: entries.filter((e) => !e.hasGps).length
+      withoutGps: entries.filter((e) => !e.hasGps).length,
+      reattempts: entries.reduce((sum, entry) => {
+        if (!entry.attempts || entry.attempts <= 1) {
+          return sum;
+        }
+        return sum + (entry.attempts - 1);
+      }, 0)
     };
     progress({ type: 'stats', stats: payload });
   }
