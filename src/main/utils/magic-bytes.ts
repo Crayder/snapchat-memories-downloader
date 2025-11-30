@@ -14,7 +14,7 @@ export const detectMagicType = async (filePath: string): Promise<MagicType> => {
   const fd = await fs.open(filePath, 'r');
   try {
     const buffer = Buffer.alloc(64);
-    await fd.read(buffer, 0, 64, 0);
+    await fs.read(fd, buffer, 0, 64, 0);
     for (const sig of MAGIC_MAP) {
       const start = sig.offset ?? 0;
       const sample = buffer.subarray(start, start + sig.bytes.length);
@@ -25,6 +25,6 @@ export const detectMagicType = async (filePath: string): Promise<MagicType> => {
     }
     return 'unknown';
   } finally {
-    await fd.close();
+    await fs.close(fd);
   }
 };

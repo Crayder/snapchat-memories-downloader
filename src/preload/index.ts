@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DialogFilters, PipelineRunRequest, PipelineRunSummary, RendererAPI, PipelineProgressEvent } from '../shared/ipc.js';
+import type { DialogFilters, RendererAPI, PipelineProgressEvent } from '../shared/ipc.js';
+import type { PipelineRunRequest, PipelineRunSummary } from '../shared/types/memory-entry.js';
 
 const api: RendererAPI = {
   selectFile: (filters: DialogFilters) => ipcRenderer.invoke('dialog:select-file', filters),

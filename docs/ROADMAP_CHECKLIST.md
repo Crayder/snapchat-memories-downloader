@@ -2,7 +2,7 @@
 
 ## Foundational Scope & Policies
 - [x] Confirm app processes only user-provided exports locally with no external transmission.
-- [ ] Remind users to request JSON-inclusive exports and to run soon after link issuance.
+- [x] Remind users to request JSON-inclusive exports and to run soon after link issuance.
 - [x] Enforce non-goals: no login automation, no scraping, no security bypasses.
 
 ## Inputs, Outputs, and Safety
@@ -25,7 +25,7 @@
 ## Download Engine
 - [x] Implement GET downloads with `X-Snap-Route-Tag: mem-dmd`, streaming to disk with temp files.
 - [x] Implement POST proxy downloads (split query, POST form, follow returned URL) plus fallback detection.
-- [ ] Add concurrency limiting, retries with exponential backoff, and pause/resume support.
+- [x] Add concurrency limiting, retries with exponential backoff, and pause/resume support.
 - [x] Infer file extensions using disposition header, MIME type, and magic bytes before renaming.
 - [x] Persist progress and sanity-check outputs before marking entries complete.
 
@@ -46,8 +46,8 @@
 - [x] Generate JSON/CSV reports summarizing successes, failures, skipped items, and duplicates.
 
 ## UI/UX Workflow
-- [ ] Build wizard screens: Welcome, Select Export, Choose Output, Options, Run (with logs/progress), Finish.
-- [ ] Surface stats (counts, GPS presence), live logs, pause/resume, and diagnostics export.
+- [x] Build wizard screens: Welcome, Select Export, Choose Output, Options, Run (with logs/progress), Finish.
+- [x] Surface stats (counts, GPS presence), live logs, pause/resume, and diagnostics export.
 - [x] Allow configuration of concurrency, retries, ZIP retention, dedupe policy, and dry-run/verify toggles.
 
 ## Packaging & Distribution

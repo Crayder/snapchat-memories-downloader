@@ -22,7 +22,8 @@ const createWindow = async () => {
     show: false,
     title: 'Snap Memories Backup',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      // electron-vite outputs preload bundle as preload.mjs; use explicit extension
+      preload: path.join(__dirname, '../preload/preload.mjs'),
       sandbox: false,
       nodeIntegration: false,
       contextIsolation: true

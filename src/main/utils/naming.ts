@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { toFilenameStamp } from './date';
+import { toFilenameStamp } from './date.js';
 
 export const buildOutputName = (capturedAtIso: string, mediaType: string, index: number, ext: string) => {
   const stamp = toFilenameStamp(capturedAtIso);
