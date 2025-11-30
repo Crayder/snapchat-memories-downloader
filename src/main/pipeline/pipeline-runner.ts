@@ -17,8 +17,37 @@ import { PipelineControl } from './pipeline-control.js';
 import { toFilenameStamp } from '../utils/date.js';
 import log from '../logger.js';
 import type { PipelineStatsPayload } from '../../shared/types/pipeline-stats.js';
-import type { FailureBreakdown, MemoryEntry, PipelineOptions, PipelineRunRequest, PipelineRunSummary } from '../../shared/types/memory-entry.js';
+import type {
+  DownloadStatus,
+  FailureBreakdown,
+  FailureStage,
+  MemoryEntry,
+  PipelineOptions,
+  PipelineRunRequest,
+  PipelineRunSummary
+} from '../../shared/types/memory-entry.js';
 import type { ProgressCallback } from '../types.js';
+
+const STATUS_STAGE_LEVEL: Record<DownloadStatus, number> = {
+  pending: 0,
+  downloading: 1,
+  downloaded: 2,
+  processed: 3,
+  metadata: 4,
+  deduped: 5,
+  failed: -1,
+  skipped: 5
+};
+
+const FAILURE_STAGE_LEVEL: Record<FailureStage, number> = {
+  download: 1,
+  'post-process': 3,
+  metadata: 4,
+  verification: 5,
+  other: 2
+};
+
+const LIVE_STATS_THROTTLE_MS = 250;
 
 export class PipelineRunner {
   private readonly parser = new IndexParser();
@@ -29,6 +58,7 @@ export class PipelineRunner {
   private isRunning = false;
   private lastReportPath?: string;
   private lastOutputDir?: string;
+  private lastStatsEmission = 0;
 
   async run(request: PipelineRunRequest, progress: ProgressCallback): Promise<PipelineRunSummary> {
     if (this.isRunning) {
@@ -71,7 +101,7 @@ export class PipelineRunner {
           return summary;
         }
       }
-      this.emitStats(entries, 'parsed', progress);
+      this.emitStats(entries, 'parsed', progress, true);
 
       if (request.options.dryRun) {
         const summary = this.buildSummary(entries, startedAt, new Date());
@@ -103,8 +133,10 @@ export class PipelineRunner {
           this.control,
           investigation
         );
-        await downloadService.run(entries, progress);
-        this.emitStats(entries, 'download', progress);
+        const downloadProgress = this.createStageProgress(entries, 'download', progress);
+        this.emitStats(entries, 'download', progress, true);
+        await downloadService.run(entries, downloadProgress);
+        this.emitStats(entries, 'download', progress, true);
 
         progress({ type: 'phase', phase: 'post-process' });
         const postProcessService = new PostProcessService(
@@ -114,22 +146,30 @@ export class PipelineRunner {
           },
           investigation
         );
-        await postProcessService.run(entries, progress, this.control);
-        this.emitStats(entries, 'post-process', progress);
+        const postProcessProgress = this.createStageProgress(entries, 'post-process', progress);
+        this.emitStats(entries, 'post-process', progress, true);
+        await postProcessService.run(entries, postProcessProgress, this.control);
+        this.emitStats(entries, 'post-process', progress, true);
 
         progress({ type: 'phase', phase: 'metadata' });
-        await this.metadataService.run(entries, progress, this.control);
-        this.emitStats(entries, 'metadata', progress);
+        const metadataProgress = this.createStageProgress(entries, 'metadata', progress);
+        this.emitStats(entries, 'metadata', progress, true);
+        await this.metadataService.run(entries, metadataProgress, this.control);
+        this.emitStats(entries, 'metadata', progress, true);
 
         progress({ type: 'phase', phase: 'dedup' });
         const dedupService = new DedupService({ duplicatesDir, strategy: request.options.dedupeStrategy });
-        await dedupService.run(entries, progress, this.control);
-        this.emitStats(entries, 'dedup', progress);
+        const dedupProgress = this.createStageProgress(entries, 'dedup', progress);
+        this.emitStats(entries, 'dedup', progress, true);
+        await dedupService.run(entries, dedupProgress, this.control);
+        this.emitStats(entries, 'dedup', progress, true);
       }
 
       progress({ type: 'phase', phase: 'verify' });
-      await this.verificationService.run(entries, progress, this.control);
-      this.emitStats(entries, 'verify', progress);
+      const verifyProgress = this.createStageProgress(entries, 'verify', progress);
+      this.emitStats(entries, 'verify', progress, true);
+      await this.verificationService.run(entries, verifyProgress, this.control);
+      this.emitStats(entries, 'verify', progress, true);
 
       const finishedAt = new Date();
       const summary = this.buildSummary(entries, startedAt, finishedAt);
@@ -212,15 +252,41 @@ export class PipelineRunner {
     });
   }
 
-  private emitStats(entries: MemoryEntry[], stage: string, progress: ProgressCallback): void {
+  private emitStats(entries: MemoryEntry[], stage: string, progress: ProgressCallback, force = false): void {
+    if (!this.shouldEmitStats(force)) {
+      return;
+    }
+    let downloaded = 0;
+    let processed = 0;
+    let metadataWritten = 0;
+    let deduped = 0;
+    let failures = 0;
+    for (const entry of entries) {
+      const level = this.resolveStageLevel(entry);
+      if (level >= 2) {
+        downloaded += 1;
+      }
+      if (level >= 3) {
+        processed += 1;
+      }
+      if (level >= 4) {
+        metadataWritten += 1;
+      }
+      if (level >= 5) {
+        deduped += 1;
+      }
+      if (entry.downloadStatus === 'failed') {
+        failures += 1;
+      }
+    }
     const payload: PipelineStatsPayload = {
       stage,
       total: entries.length,
-      downloaded: entries.filter((e) => e.downloadStatus === 'downloaded').length,
-      processed: entries.filter((e) => e.downloadStatus === 'processed').length,
-      metadataWritten: entries.filter((e) => e.downloadStatus === 'metadata').length,
-      deduped: entries.filter((e) => e.downloadStatus === 'deduped').length,
-      failures: entries.filter((e) => e.downloadStatus === 'failed').length,
+      downloaded,
+      processed,
+      metadataWritten,
+      deduped,
+      failures,
       images: entries.filter((e) => e.mediaType === 'image').length,
       videos: entries.filter((e) => e.mediaType === 'video').length,
       withGps: entries.filter((e) => e.hasGps).length,
@@ -234,6 +300,39 @@ export class PipelineRunner {
       failureBreakdown: this.buildFailureBreakdown(entries)
     };
     progress({ type: 'stats', stats: payload });
+  }
+
+  private createStageProgress(entries: MemoryEntry[], stage: string, progress: ProgressCallback): ProgressCallback {
+    return (event) => {
+      progress(event);
+      if (event.type === 'entry' || event.type === 'error') {
+        this.emitStats(entries, stage, progress);
+      }
+    };
+  }
+
+  private resolveStageLevel(entry: MemoryEntry): number {
+    const baseLevel = STATUS_STAGE_LEVEL[entry.downloadStatus] ?? 0;
+    if (baseLevel >= 0) {
+      return baseLevel;
+    }
+    if (entry.downloadStatus === 'failed' && entry.failureStage) {
+      return FAILURE_STAGE_LEVEL[entry.failureStage] ?? 1;
+    }
+    return 0;
+  }
+
+  private shouldEmitStats(force: boolean): boolean {
+    if (force) {
+      this.lastStatsEmission = Date.now();
+      return true;
+    }
+    const now = Date.now();
+    if (now - this.lastStatsEmission < LIVE_STATS_THROTTLE_MS) {
+      return false;
+    }
+    this.lastStatsEmission = now;
+    return true;
   }
 
   private async populateFinalPathsFromDisk(entries: MemoryEntry[], finalDir: string): Promise<void> {
