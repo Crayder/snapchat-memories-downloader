@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "isolatedModules": true
+  },
+  "include": ["src/renderer/src/**/*", "src/renderer/**/*.ts", "src/shared/**/*"],
+  "exclude": ["node_modules", "dist", "dist-electron"]
+}

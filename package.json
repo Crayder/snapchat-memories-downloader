@@ -1,0 +1,107 @@
+{
+  "name": "snap-export-worker",
+  "version": "0.1.0",
+  "description": "Electron app for ingesting Snapchat Memories exports and producing an auditable archive.",
+  "main": "dist-electron/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && electron-builder",
+    "preview": "electron-vite preview",
+    "lint": "eslint . --ext .ts,.tsx,.mts,.cts --max-warnings=0",
+    "format": "prettier --write \"{src,config,scripts}/**/*.{ts,tsx,cts,mts}\" docs/**/*.md",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
+  },
+  "keywords": [
+    "snapchat",
+    "memories",
+    "electron",
+    "backup"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "cheerio": "^1.0.0-rc.12",
+    "clsx": "^2.1.1",
+    "electron-log": "^5.1.4",
+    "exiftool-vendored": "^25.0.0",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "fs-extra": "^11.2.0",
+    "luxon": "^3.5.0",
+    "mime-types": "^2.1.35",
+    "node-stream-zip": "^1.15.0",
+    "p-queue": "^8.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.33.4",
+    "undici": "^6.19.7",
+    "uuid": "^11.0.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/ffprobe-static": "^2.0.3",
+    "@types/fluent-ffmpeg": "^2.1.28",
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^20.11.30",
+    "@types/react": "^18.3.10",
+    "@types/react-dom": "^18.3.7",
+    "@typescript-eslint/eslint-plugin": "^7.13.1",
+    "@typescript-eslint/parser": "^7.13.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "eslint-plugin-react-refresh": "^0.4.7",
+    "prettier": "^3.3.3",
+    "typescript": "5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "build": {
+    "appId": "app.snap.memories.backup",
+    "productName": "Snap Memories Backup",
+    "directories": {
+      "buildResources": "resources"
+    },
+    "files": [
+      "dist",
+      "dist-electron",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
