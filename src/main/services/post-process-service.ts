@@ -12,8 +12,9 @@ import { buildOutputName } from '../utils/naming.js';
 import { detectMagicType } from '../utils/magic-bytes.js';
 import type { ProgressCallback } from '../types.js';
 
-if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic as string);
+const resolvedFfmpegBinary = typeof ffmpegStatic === 'string' ? ffmpegStatic : null;
+if (resolvedFfmpegBinary) {
+  ffmpeg.setFfmpegPath(resolvedFfmpegBinary);
 }
 if (ffprobe && ffprobe.path) {
   ffmpeg.setFfprobePath(ffprobe.path);
