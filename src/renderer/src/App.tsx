@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import type { PipelineRunRequest, PipelineRunSummary } from '../../shared/types/memory-entry.js';
+import type { FailureBreakdown, PipelineRunRequest, PipelineRunSummary } from '../../shared/types/memory-entry.js';
 import type { PipelineProgressEvent } from '../../shared/ipc.js';
 import type { PipelineStatsPayload } from '../../shared/types/pipeline-stats.js';
 
@@ -12,7 +12,6 @@ const DEFAULT_OPTIONS: PipelineRunRequest['options'] = {
   cleanupDownloads: false,
   batchPauseCount: 0,
   retryFailedOnly: false,
-  keepZipPayloads: false,
   dedupeStrategy: 'move',
   dryRun: false,
   verifyOnly: false
@@ -45,12 +44,20 @@ const STEPS = [
   }
 ];
 
+const EMPTY_FAILURE_BREAKDOWN: FailureBreakdown = {
+  download: 0,
+  postProcess: 0,
+  metadata: 0,
+  verification: 0,
+  other: 0
+};
+
 const cascadeSummaryCounts = (data: PipelineRunSummary) => {
   const deduped = data.deduped ?? 0;
   const metadataWritten = Math.max(data.metadataWritten ?? 0, deduped);
   const processed = Math.max(data.processed ?? 0, metadataWritten);
   const downloaded = Math.max(data.downloaded ?? 0, processed);
-  return { ...data, downloaded, processed, metadataWritten };
+  return { ...data, downloaded, processed, metadataWritten, failureBreakdown: { ...EMPTY_FAILURE_BREAKDOWN, ...(data.failureBreakdown ?? EMPTY_FAILURE_BREAKDOWN) } };
 };
 
 type LogEntry = {
@@ -216,7 +223,7 @@ const App = () => {
     }
   };
 
-  const handleToggle = (key: 'keepZipPayloads' | 'dryRun' | 'verifyOnly' | 'cleanupDownloads') => (event: ChangeEvent<HTMLInputElement>) => {
+  const handleToggle = (key: 'dryRun' | 'verifyOnly' | 'cleanupDownloads') => (event: ChangeEvent<HTMLInputElement>) => {
     setOptions((prev) => ({ ...prev, [key]: event.target.checked }));
   };
 
@@ -368,6 +375,7 @@ const App = () => {
   };
 
   const renderStats = () => {
+    const breakdown = stats?.failureBreakdown ?? EMPTY_FAILURE_BREAKDOWN;
     const entries = [
       { label: 'Total Memories', value: stats?.total ?? '--' },
       { label: 'Images', value: stats?.images ?? '--' },
@@ -378,7 +386,12 @@ const App = () => {
       { label: 'Metadata', value: stats?.metadataWritten ?? 0 },
       { label: 'Deduped', value: stats?.deduped ?? 0 },
       { label: 'Failures', value: stats?.failures ?? 0 },
-      { label: 'Reattempts', value: stats?.reattempts ?? 0 }
+      { label: 'Reattempts', value: stats?.reattempts ?? 0 },
+      { label: 'Download failures', value: breakdown.download },
+      { label: 'Post-process failures', value: breakdown.postProcess },
+      { label: 'Metadata failures', value: breakdown.metadata },
+      { label: 'Verification failures', value: breakdown.verification },
+      { label: 'Other failures', value: breakdown.other }
     ];
 
     return (
@@ -584,17 +597,7 @@ const App = () => {
         />
         <span className="block text-xs text-slate-500">Set to 0 to keep running continuously. You can still toggle the batch pauser on the Run tab.</span>
       </label>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Keep caption ZIP payloads for manual review instead of deleting them once merged.">
-          <input
-            type="checkbox"
-            className="mt-1 h-4 w-4 rounded border-white/30 bg-black"
-            checked={options.keepZipPayloads}
-            onChange={handleToggle('keepZipPayloads')}
-            disabled={running}
-          />
-          <span>Keep caption ZIP payloads</span>
-        </label>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Run parsing and validation without downloading media.">
           <input
             type="checkbox"
@@ -734,12 +737,34 @@ const App = () => {
   const renderFinish = () => (
     summary && (() => {
       const cascaded = cascadeSummaryCounts(summary);
+      const breakdown = cascaded.failureBreakdown ?? EMPTY_FAILURE_BREAKDOWN;
+      const nonDownloadFailures = breakdown.postProcess + breakdown.metadata + breakdown.verification + breakdown.other;
       const durationSeconds = (summary.durationMs / 1000).toFixed(1);
       return (
         <section className="glass-card space-y-6">
           <div className="space-y-2">
             <h2 className="text-2xl font-semibold">5. Review & Export</h2>
             <p className="text-sm text-slate-300">Everything completed. Inspect the summary, open the report, and capture diagnostics for your records.</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/35 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Failure breakdown</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {[ 
+                { label: 'Download failures', value: breakdown.download },
+                { label: 'Post-process failures', value: breakdown.postProcess },
+                { label: 'Metadata failures', value: breakdown.metadata },
+                { label: 'Verification failures', value: breakdown.verification },
+                { label: 'Other failures', value: breakdown.other }
+              ].map((item) => (
+                <div key={item.label} className="stat-card">
+                  <p className="text-xs uppercase tracking-wide text-slate-400">{item.label}</p>
+                  <p className="text-xl font-semibold text-white">{item.value}</p>
+                </div>
+              ))}
+            </div>
+            {nonDownloadFailures > 0 && (
+              <p className="mt-2 text-xs text-amber-200">Most non-download failures point to caption ZIP or metadata issues. Inspect the diagnostics bundle or the <code className="font-mono">_zip_failures</code> folder inside your output directory to review captured artifacts.</p>
+            )}
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[

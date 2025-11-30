@@ -17,7 +17,7 @@ import { PipelineControl } from './pipeline-control.js';
 import { toFilenameStamp } from '../utils/date.js';
 import log from '../logger.js';
 import type { PipelineStatsPayload } from '../../shared/types/pipeline-stats.js';
-import type { MemoryEntry, PipelineOptions, PipelineRunRequest, PipelineRunSummary } from '../../shared/types/memory-entry.js';
+import type { FailureBreakdown, MemoryEntry, PipelineOptions, PipelineRunRequest, PipelineRunSummary } from '../../shared/types/memory-entry.js';
 import type { ProgressCallback } from '../types.js';
 
 export class PipelineRunner {
@@ -110,8 +110,7 @@ export class PipelineRunner {
         const postProcessService = new PostProcessService(
           {
             outputDir: finalDir,
-            tempDir,
-            keepZipPayloads: request.options.keepZipPayloads
+            tempDir
           },
           investigation
         );
@@ -176,7 +175,8 @@ export class PipelineRunner {
       failures,
       reattempts,
       durationMs: finishedAt.getTime() - startedAt.getTime(),
-      reportPath: ''
+      reportPath: '',
+      failureBreakdown: this.buildFailureBreakdown(entries)
     };
   }
 
@@ -230,7 +230,8 @@ export class PipelineRunner {
           return sum;
         }
         return sum + (entry.attempts - 1);
-      }, 0)
+      }, 0),
+      failureBreakdown: this.buildFailureBreakdown(entries)
     };
     progress({ type: 'stats', stats: payload });
   }
@@ -343,6 +344,42 @@ export class PipelineRunner {
       if (stored.finalPath) {
         entry.finalPath = stored.finalPath;
       }
+      if (stored.failureStage) {
+        entry.failureStage = stored.failureStage;
+      }
     }
+  }
+
+  private buildFailureBreakdown(entries: MemoryEntry[]): FailureBreakdown {
+    const breakdown: FailureBreakdown = {
+      download: 0,
+      postProcess: 0,
+      metadata: 0,
+      verification: 0,
+      other: 0
+    };
+    for (const entry of entries) {
+      if (entry.downloadStatus !== 'failed') {
+        continue;
+      }
+      switch (entry.failureStage) {
+        case 'download':
+          breakdown.download += 1;
+          break;
+        case 'post-process':
+          breakdown.postProcess += 1;
+          break;
+        case 'metadata':
+          breakdown.metadata += 1;
+          break;
+        case 'verification':
+          breakdown.verification += 1;
+          break;
+        default:
+          breakdown.other += 1;
+          break;
+      }
+    }
+    return breakdown;
   }
 }

@@ -8,9 +8,11 @@ import type { ProgressCallback } from '../types.js';
 import type { PauseSignal } from '../pipeline/pipeline-control.js';
 import { detectMagicType } from '../utils/magic-bytes.js';
 import { streamHash } from '../utils/files.js';
+import log from '../logger.js';
 
 if (ffprobe && ffprobe.path) {
-  ffmpeg.setFfprobePath(ffprobe.path);
+  const unpackedProbe = ffprobe.path.replace('app.asar', 'app.asar.unpacked');
+  ffmpeg.setFfprobePath(unpackedProbe);
 }
 
 export class VerificationService {
@@ -26,6 +28,8 @@ export class VerificationService {
       } catch (error) {
         entry.downloadStatus = 'failed';
         entry.errors = [...(entry.errors ?? []), (error as Error).message];
+        entry.failureStage = 'verification';
+        log.error('Verification failed for %s: %s', entry.finalPath ?? 'unknown', (error as Error).message);
         progress({ type: 'error', entry, error: error as Error });
       }
     }

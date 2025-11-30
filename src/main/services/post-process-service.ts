@@ -7,25 +7,40 @@ import type { FfprobeData } from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobe from 'ffprobe-static';
 import StreamZip from 'node-stream-zip';
-import type { MemoryEntry, MemoryMediaType } from '../../shared/types/memory-entry.js';
+import type { FailureStage, MemoryEntry, MemoryMediaType } from '../../shared/types/memory-entry.js';
 import { buildOutputName } from '../utils/naming.js';
 import { detectMagicType } from '../utils/magic-bytes.js';
 import type { ProgressCallback } from '../types.js';
 import type { PauseSignal } from '../pipeline/pipeline-control.js';
 import type { InvestigationJournal } from './investigation-journal.js';
+import log from '../logger.js';
 
-const resolvedFfmpegBinary = typeof ffmpegStatic === 'string' ? ffmpegStatic : null;
-if (resolvedFfmpegBinary) {
-  ffmpeg.setFfmpegPath(resolvedFfmpegBinary);
+const resolvePackedBinary = (label: string, absolutePath: string | null): string | null => {
+  if (!absolutePath) {
+    log.warn('%s binary not provided by static dependency; falling back to PATH.', label);
+    return null;
+  }
+  const candidate = absolutePath.replace('app.asar', 'app.asar.unpacked');
+  if (!fs.existsSync(candidate)) {
+    log.warn('%s binary missing at %s. Ensure it is unpacked for packaged builds.', label, candidate);
+    return null;
+  }
+  return candidate;
+};
+
+const resolvedFfmpegBinary = (typeof ffmpegStatic === 'string' ? ffmpegStatic : null) as string | null;
+const unpackedFfmpeg = resolvePackedBinary('ffmpeg', resolvedFfmpegBinary);
+if (unpackedFfmpeg) {
+  ffmpeg.setFfmpegPath(unpackedFfmpeg);
 }
-if (ffprobe && ffprobe.path) {
-  ffmpeg.setFfprobePath(ffprobe.path);
+const unpackedFfprobe = resolvePackedBinary('ffprobe', ffprobe?.path ?? null);
+if (unpackedFfprobe) {
+  ffmpeg.setFfprobePath(unpackedFfprobe);
 }
 
 export interface PostProcessOptions {
   outputDir: string;
   tempDir: string;
-  keepZipPayloads: boolean;
 }
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.m4v'];
@@ -51,9 +66,9 @@ export class PostProcessService {
         }
         entry.downloadStatus = 'processed';
       } catch (error) {
-        entry.downloadStatus = 'failed';
-        entry.errors = [...(entry.errors ?? []), (error as Error).message];
+        this.recordFailure(entry, 'post-process', error as Error);
         progress({ type: 'error', entry, error: error as Error });
+        log.error('Post-process failed for #%d (%s): %s', entry.index, entry.downloadedPath ?? 'unknown', (error as Error).stack ?? (error as Error).message);
       }
     }
     return entries;
@@ -79,46 +94,61 @@ export class PostProcessService {
     } finally {
       await zip.close();
     }
-    const files = await this.listFiles(extractDir);
-    if (!files.length) {
-      throw new Error('Caption ZIP did not contain any files.');
+
+    let failure: Error | null = null;
+    try {
+      const files = await this.listFiles(extractDir);
+      if (!files.length) {
+        throw new Error('Caption ZIP did not contain any files.');
+      }
+      const base = await this.pickBaseFile(files, entry.mediaType);
+      const overlays = files.filter((file) => path.extname(file).toLowerCase() === '.png' && file !== base);
+
+      this.investigation?.recordZipPayload({
+        index: entry.index,
+        fileCount: files.length,
+        overlayCount: overlays.length,
+        extensions: this.countExtensions(files)
+      });
+
+      if (!base) {
+        throw new Error('Unable to identify base media within caption ZIP.');
+      }
+
+      const baseExt = path.extname(base).toLowerCase();
+      const inferredType = this.inferMediaTypeFromExt(baseExt);
+      const targetMediaType: MemoryMediaType = (inferredType ?? entry.mediaType ?? 'image');
+      entry.mediaType = targetMediaType;
+
+      if (targetMediaType === 'video') {
+        const videoDims = await this.getVideoDimensions(base);
+        const overlayAsset = overlays.length ? await this.mergeOverlays(overlays, videoDims) : undefined;
+        await this.overlayVideo(base, overlayAsset, entry, targetMediaType);
+      } else {
+        await this.composeImage(base, overlays, entry, targetMediaType);
+      }
+
+    } catch (error) {
+      failure = error as Error;
+      await this.captureZipFailure(entry, extractDir, failure);
+      throw error;
+    } finally {
+      await this.safeRemoveDir(extractDir, `zip-${entry.index}${failure ? '-failed' : ''}`);
     }
-    const base = await this.pickBaseFile(files, entry.mediaType);
-    const overlays = files.filter((file) => path.extname(file).toLowerCase() === '.png' && file !== base);
-
-    this.investigation?.recordZipPayload({
-      index: entry.index,
-      fileCount: files.length,
-      overlayCount: overlays.length,
-      extensions: this.countExtensions(files)
-    });
-
-    if (!base) {
-      throw new Error('Unable to identify base media within caption ZIP.');
-    }
-
-    const baseExt = path.extname(base).toLowerCase();
-    const inferredType = this.inferMediaTypeFromExt(baseExt);
-    const targetMediaType: MemoryMediaType = (inferredType ?? entry.mediaType ?? 'image');
-    entry.mediaType = targetMediaType;
-
-    if (targetMediaType === 'video') {
-      const overlayAsset = overlays.length ? await this.mergeOverlays(overlays, await this.getVideoDimensions(base)) : undefined;
-      await this.overlayVideo(base, overlayAsset, entry, targetMediaType);
-    } else {
-      await this.composeImage(base, overlays, entry, targetMediaType);
-    }
-
-    if (!this.options.keepZipPayloads) {
-      await fs.remove(entry.downloadedPath!);
-    }
-    await fs.remove(extractDir);
   }
 
   private async composeImage(basePath: string, overlays: string[], entry: MemoryEntry, mediaType: MemoryMediaType = 'image'): Promise<void> {
-    let pipeline = sharp(basePath);
+    const baseImage = sharp(basePath);
+    const metadata = await baseImage.metadata();
+    let pipeline = baseImage;
     if (overlays.length) {
-      const comps = overlays.map((overlay) => ({ input: overlay, left: 0, top: 0 }));
+      const comps = await Promise.all(
+        overlays.map(async (overlay) => ({
+          input: await this.normalizeOverlay(overlay, metadata.width, metadata.height),
+          left: 0,
+          top: 0
+        }))
+      );
       pipeline = pipeline.composite(comps);
     }
     const finalName = buildOutputName(entry.capturedAtUtc, mediaType === 'video' ? 'video' : 'image', entry.index, path.extname(basePath) || '.jpg');
@@ -159,7 +189,13 @@ export class PostProcessService {
         background: { r: 0, g: 0, b: 0, alpha: 0 }
       }
     });
-    const composites = paths.map((overlay) => ({ input: overlay, left: 0, top: 0 }));
+    const composites = await Promise.all(
+      paths.map(async (overlay) => ({
+        input: await this.normalizeOverlay(overlay, dimensions.width, dimensions.height),
+        left: 0,
+        top: 0
+      }))
+    );
     const tempFile = path.join(this.options.tempDir, `overlay-${Date.now()}.png`);
     await canvas.composite(composites).png().toFile(tempFile);
     return tempFile;
@@ -169,6 +205,7 @@ export class PostProcessService {
     return new Promise((resolve, reject) => {
       ffmpeg.ffprobe(videoPath, (error: Error | null, metadata: FfprobeData) => {
         if (error) {
+          log.error('ffprobe failed for %s: %s', videoPath, error.message);
           reject(error);
           return;
         }
@@ -254,5 +291,73 @@ export class PostProcessService {
       return 'image';
     }
     return undefined;
+  }
+
+  private async normalizeOverlay(overlayPath: string, targetWidth?: number, targetHeight?: number): Promise<Buffer | string> {
+    if (!targetWidth && !targetHeight) {
+      return overlayPath;
+    }
+    const meta = await sharp(overlayPath).metadata();
+    const width = meta.width ?? 0;
+    const height = meta.height ?? 0;
+    if (targetWidth && targetHeight && width === targetWidth && height === targetHeight) {
+      return overlayPath;
+    }
+    return sharp(overlayPath)
+      .resize({
+        width: targetWidth,
+        height: targetHeight,
+        fit: 'inside',
+        withoutEnlargement: false
+      })
+      .png()
+      .toBuffer();
+  }
+
+  private async safeRemoveDir(dir: string, context?: string): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await fs.rm(dir, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        if (attempt === 2) {
+          log.warn('Failed to remove temp directory %s (%s): %s', dir, context ?? 'cleanup', (error as Error).message);
+          return;
+        }
+        await this.delay(200 * (attempt + 1));
+      }
+    }
+  }
+
+  private async captureZipFailure(entry: MemoryEntry, extractDir: string, error: Error): Promise<void> {
+    try {
+      if (!(await fs.pathExists(extractDir))) {
+        return;
+      }
+      const failureDir = path.join(this.options.outputDir, '_zip_failures');
+      await fs.ensureDir(failureDir);
+      const target = path.join(failureDir, `entry-${entry.index}-${Date.now()}`);
+      await fs.copy(extractDir, target, { overwrite: true });
+      await fs.writeJson(path.join(target, '_failure.json'), {
+        index: entry.index,
+        downloadedPath: entry.downloadedPath,
+        mediaType: entry.mediaType,
+        error: error.message,
+        capturedAt: new Date().toISOString()
+      });
+      log.warn('ZIP failure artifacts persisted to %s for entry #%d', target, entry.index);
+    } catch (captureError) {
+      log.warn('Unable to capture ZIP failure artifacts for #%d: %s', entry.index, (captureError as Error).message);
+    }
+  }
+
+  private recordFailure(entry: MemoryEntry, stage: FailureStage, error: Error): void {
+    entry.downloadStatus = 'failed';
+    entry.failureStage = stage;
+    entry.errors = [...(entry.errors ?? []), error.message];
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

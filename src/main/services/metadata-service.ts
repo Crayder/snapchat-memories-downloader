@@ -21,6 +21,7 @@ export class MetadataService {
       } catch (error) {
         entry.downloadStatus = 'failed';
         entry.errors = [...(entry.errors ?? []), (error as Error).message];
+        entry.failureStage = 'metadata';
         log.error('Metadata write failed for %s: %s', entry.finalPath, (error as Error).message);
       }
     }

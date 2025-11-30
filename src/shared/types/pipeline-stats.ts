@@ -1,3 +1,5 @@
+import type { FailureBreakdown } from './memory-entry.js';
+
 export interface PipelineStatsPayload {
   stage: string;
   total: number;
@@ -11,4 +13,5 @@ export interface PipelineStatsPayload {
   withGps: number;
   withoutGps: number;
   reattempts: number;
+  failureBreakdown: FailureBreakdown;
 }

@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import fs from 'fs-extra';
 import PQueue from 'p-queue';
 import mime from 'mime-types';
-import type { MemoryEntry } from '../../shared/types/memory-entry.js';
+import type { FailureStage, MemoryEntry } from '../../shared/types/memory-entry.js';
 import { buildOutputName } from '../utils/naming.js';
 import { tempPath } from '../utils/files.js';
 import { detectMagicType } from '../utils/magic-bytes.js';
@@ -61,8 +61,7 @@ export class DownloadService {
           return await this.processEntry(entry, progress);
         } catch (error) {
           progress({ type: 'error', entry, error: error as Error });
-          entry.downloadStatus = 'failed';
-          entry.errors = [...(entry.errors ?? []), (error as Error).message];
+          this.markFailure(entry, 'download', (error as Error).message);
           return entry;
         }
       }) as Promise<MemoryEntry>;
@@ -104,7 +103,14 @@ export class DownloadService {
         if (attempt >= this.options.retryLimit) {
           entry.downloadStatus = 'failed';
           entry.attempts = attempt;
-          this.state.upsert({ index: entry.index, downloadStatus: 'failed', errors: entry.errors, attempts: attempt });
+          this.markFailure(entry, 'download');
+          this.state.upsert({
+            index: entry.index,
+            downloadStatus: 'failed',
+            errors: entry.errors,
+            attempts: attempt,
+            failureStage: entry.failureStage
+          });
           throw error;
         }
         const delay = Math.min(2000 * 2 ** (attempt - 1), 30000);
@@ -246,6 +252,14 @@ export class DownloadService {
         return '.zip';
       default:
         return mediaType === 'video' ? '.mp4' : '.jpg';
+    }
+  }
+
+  private markFailure(entry: MemoryEntry, stage: FailureStage, message?: string): void {
+    entry.downloadStatus = 'failed';
+    entry.failureStage = stage;
+    if (message) {
+      entry.errors = [...(entry.errors ?? []), message];
     }
   }
 }

@@ -1,5 +1,7 @@
 export type MemoryMediaType = 'image' | 'video' | 'unknown';
 
+export type FailureStage = 'download' | 'post-process' | 'metadata' | 'verification' | 'other';
+
 export type DownloadStatus =
   | 'pending'
   | 'downloading'
@@ -28,6 +30,7 @@ export interface MemoryEntry {
   errors?: string[];
   attempts?: number;
   contentHash?: string;
+  failureStage?: FailureStage;
 }
 
 export interface PipelineOptions {
@@ -35,7 +38,6 @@ export interface PipelineOptions {
   retryLimit: number;
   throttleDelayMs: number;
   attemptTimeoutMs: number;
-  keepZipPayloads: boolean;
   cleanupDownloads: boolean;
   batchPauseCount: number;
   retryFailedOnly?: boolean;
@@ -62,4 +64,13 @@ export interface PipelineRunSummary {
   reattempts: number;
   durationMs: number;
   reportPath: string;
+  failureBreakdown: FailureBreakdown;
+}
+
+export interface FailureBreakdown {
+  download: number;
+  postProcess: number;
+  metadata: number;
+  verification: number;
+  other: number;
 }

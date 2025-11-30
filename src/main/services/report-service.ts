@@ -18,12 +18,13 @@ export class ReportService {
   }
 
   private buildCsv(entries: MemoryEntry[]): string {
-    const header = ['index', 'capturedAtUtc', 'mediaType', 'status', 'finalPath', 'hasGps', 'latitude', 'longitude', 'downloadUrl', 'errors'];
+    const header = ['index', 'capturedAtUtc', 'mediaType', 'status', 'failureStage', 'finalPath', 'hasGps', 'latitude', 'longitude', 'downloadUrl', 'errors'];
     const rows = entries.map((entry) => [
       entry.index,
       entry.capturedAtUtc,
       entry.mediaType,
       entry.downloadStatus,
+      entry.failureStage ?? '',
       entry.finalPath ?? '',
       entry.hasGps,
       entry.latitude ?? '',

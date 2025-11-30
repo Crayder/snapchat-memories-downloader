@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 import path from 'node:path';
-import { DownloadStatus } from '../../shared/types/memory-entry.js';
+import { DownloadStatus, FailureStage } from '../../shared/types/memory-entry.js';
 
 export interface EntryStateRecord {
   index: number;
@@ -10,6 +10,7 @@ export interface EntryStateRecord {
   contentHash?: string;
   errors?: string[];
   attempts?: number;
+  failureStage?: FailureStage;
 }
 
 interface PersistedState {

@@ -12,3 +12,5 @@
 - [x] Add a Run-page "auto-pause on error" toggle that halts automatically when failures hit the log.
 - [x] Make "Retry failures" only reattempt entries that previously failed instead of redownloading everything.
 - [x] Add a batch pause option (configurable count, runtime toggle) to auto-pause after N operations.
+- [x] Instrument post-process/post-run failures with stage tagging, ffprobe path validation, and captured ZIP artifacts.
+- [x] Surface per-stage failure counts on the Run stats and Finish summary.
