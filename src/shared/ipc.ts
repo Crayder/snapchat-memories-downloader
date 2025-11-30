@@ -31,6 +31,7 @@ export interface RendererAPI {
   pausePipeline(): Promise<{ paused: boolean }>;
   resumePipeline(): Promise<{ paused: boolean }>;
   exportDiagnostics(): Promise<{ path: string }>;
+  openOutputFolder(): Promise<{ path: string }>;
   onProgress(callback: (event: PipelineProgressEvent) => void): () => void;
 }
 

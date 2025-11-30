@@ -6,7 +6,7 @@ export interface DiagnosticsRequest {
   destinationDir: string;
   logsDir: string;
   reportPath?: string;
-  stateDir?: string;
+  statePath?: string;
   extraFiles?: string[];
 }
 
@@ -32,8 +32,8 @@ export class DiagnosticsService {
       archive.file(request.reportPath, { name: path.basename(request.reportPath) });
     }
 
-    if (request.stateDir && (await fs.pathExists(request.stateDir))) {
-      archive.directory(request.stateDir, 'state');
+    if (request.statePath && (await fs.pathExists(request.statePath))) {
+      archive.file(request.statePath, { name: 'state.json' });
     }
 
     if (await fs.pathExists(request.logsDir)) {

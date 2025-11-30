@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import log from './logger.js';
 import { PipelineRunner } from './pipeline/pipeline-runner.js';
@@ -127,4 +127,13 @@ ipcMain.handle('pipeline:resume', () => {
 ipcMain.handle('pipeline:diagnostics', async () => {
   const path = await runner.createDiagnosticsBundle();
   return { path };
+});
+
+ipcMain.handle('pipeline:open-output', async () => {
+  const outputDir = runner.getLastOutputDir();
+  if (!outputDir) {
+    throw new Error('Output folder unavailable until a run finishes.');
+  }
+  await shell.openPath(outputDir);
+  return { path: outputDir };
 });

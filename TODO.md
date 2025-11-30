@@ -5,3 +5,5 @@
 - [x] Move the report path into its own row with a copy-to-clipboard control.
 - [x] Ensure the "Export Diagnostics Bundle" button performs its export action.
 - [x] Add Finish page continuation options (retry failures, restart, exit).
+- [x] Implement post-run cleanup: relocate state.json to output root, delete .tmp/work, optional downloads purge, remove empty duplicates.
+- [x] Add Finish page action to open the output folder.

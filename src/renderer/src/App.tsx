@@ -9,6 +9,7 @@ const DEFAULT_OPTIONS: PipelineRunRequest['options'] = {
   retryLimit: 3,
   throttleDelayMs: 0,
   attemptTimeoutMs: 15000,
+  cleanupDownloads: false,
   keepZipPayloads: false,
   dedupeStrategy: 'move',
   dryRun: false,
@@ -137,7 +138,7 @@ const App = () => {
     }
   };
 
-  const handleToggle = (key: 'keepZipPayloads' | 'dryRun' | 'verifyOnly') => (event: ChangeEvent<HTMLInputElement>) => {
+  const handleToggle = (key: 'keepZipPayloads' | 'dryRun' | 'verifyOnly' | 'cleanupDownloads') => (event: ChangeEvent<HTMLInputElement>) => {
     setOptions((prev) => ({ ...prev, [key]: event.target.checked }));
   };
 
@@ -249,6 +250,15 @@ const App = () => {
 
   const handleExitApp = () => {
     window.close();
+  };
+
+  const handleOpenOutputFolder = async () => {
+    try {
+      const result = await window.electronAPI.openOutputFolder();
+      pushLog(`Opened output folder: ${result.path}`);
+    } catch (error) {
+      pushLog(`Unable to open output folder: ${(error as Error).message}`);
+    }
   };
 
   const canAdvanceFrom = (current: number): boolean => {
@@ -472,7 +482,7 @@ const App = () => {
       <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
         Snapchat can rate limit aggressively if concurrency is high and no delay is used. Start with a 250-500 ms delay and increase slowly once the export flows reliably; keep the timeout under a minute so individual memories do not stall the queue indefinitely.
       </div>
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Keep caption ZIP payloads for manual review instead of deleting them once merged.">
           <input
             type="checkbox"
@@ -502,6 +512,16 @@ const App = () => {
             disabled={running}
           />
           <span>Verify outputs only</span>
+        </label>
+        <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="After a successful run, delete the intermediate downloads folder automatically (always deleted if empty).">
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-white/30 bg-black"
+            checked={options.cleanupDownloads}
+            onChange={handleToggle('cleanupDownloads')}
+            disabled={running}
+          />
+          <span>Delete downloads after run</span>
         </label>
       </div>
     </section>
@@ -629,6 +649,14 @@ const App = () => {
               disabled={!summary || diagnosticsBusy}
             >
               {diagnosticsBusy ? 'Exporting…' : 'Export Diagnostics Bundle'}
+            </button>
+            <button
+              data-tooltip="Open the output folder that contains memories, duplicates, and reports."
+              className="rounded-xl border border-white/15 bg-black/40 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40 disabled:opacity-50"
+              onClick={handleOpenOutputFolder}
+              disabled={!summary}
+            >
+              Open output folder
             </button>
           </div>
           {(diagnosticsBusy || diagnosticsPath) && (

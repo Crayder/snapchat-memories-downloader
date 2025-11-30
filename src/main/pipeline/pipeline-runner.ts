@@ -14,8 +14,9 @@ import { DiagnosticsService } from '../services/diagnostics-service.js';
 import { InvestigationJournal } from '../services/investigation-journal.js';
 import { PipelineControl } from './pipeline-control.js';
 import { toFilenameStamp } from '../utils/date.js';
+import log from '../logger.js';
 import type { PipelineStatsPayload } from '../../shared/types/pipeline-stats.js';
-import type { MemoryEntry, PipelineRunRequest, PipelineRunSummary } from '../../shared/types/memory-entry.js';
+import type { MemoryEntry, PipelineOptions, PipelineRunRequest, PipelineRunSummary } from '../../shared/types/memory-entry.js';
 import type { ProgressCallback } from '../types.js';
 
 export class PipelineRunner {
@@ -38,7 +39,7 @@ export class PipelineRunner {
     const startedAt = new Date();
     const { reportDir } = getAppPaths();
     const importService = new ImportService(path.join(request.outputDir, 'work'));
-    const stateStore = new StateStore(path.join(request.outputDir, 'state'));
+    const stateStore = new StateStore(request.outputDir);
     await stateStore.load().catch(() => stateStore.clear());
     const investigation = new InvestigationJournal();
 
@@ -121,6 +122,7 @@ export class PipelineRunner {
       await stateStore.save();
       await this.metadataService.dispose();
       await investigation.writeReport(reportDir);
+      await this.cleanupOutputArtifacts(request.outputDir, request.options);
       this.lastReportPath = reportPath;
       this.lastOutputDir = request.outputDir;
       progress({ type: 'phase', phase: 'complete' });
@@ -164,6 +166,10 @@ export class PipelineRunner {
     return { running: this.isRunning, paused: this.control.paused };
   }
 
+  getLastOutputDir(): string | undefined {
+    return this.lastOutputDir;
+  }
+
   pause(): void {
     if (!this.isRunning) {
       return;
@@ -184,7 +190,7 @@ export class PipelineRunner {
       destinationDir: reportDir,
       logsDir: logDir,
       reportPath: this.lastReportPath,
-      stateDir: path.join(this.lastOutputDir, 'state')
+      statePath: path.join(this.lastOutputDir, 'state.json')
     });
   }
 
@@ -230,6 +236,77 @@ export class PipelineRunner {
         entry.finalPath = existing;
         entry.downloadStatus = 'processed';
       }
+    }
+  }
+
+  private async cleanupOutputArtifacts(outputDir: string, options: PipelineOptions): Promise<void> {
+    const downloadDir = path.join(outputDir, 'downloads');
+    const tempDir = path.join(outputDir, '.tmp');
+    const workDir = path.join(outputDir, 'work');
+    const duplicatesDir = path.join(outputDir, 'duplicates');
+    const legacyStateDir = path.join(outputDir, 'state');
+    const tasks: Array<Promise<void>> = [];
+
+    tasks.push(this.removeIfExists(tempDir));
+    tasks.push(this.removeIfExists(workDir));
+    tasks.push(this.removeLegacyStateDir(legacyStateDir));
+    tasks.push(this.handleDownloadsCleanup(downloadDir, options.cleanupDownloads));
+    tasks.push(this.removeDuplicatesIfEmpty(duplicatesDir));
+
+    await Promise.allSettled(tasks);
+  }
+
+  private async removeIfExists(target: string): Promise<void> {
+    if (!(await fs.pathExists(target))) {
+      return;
+    }
+    try {
+      await fs.remove(target);
+    } catch (error) {
+      log.warn('Failed to remove %s: %s', target, (error as Error).message);
+    }
+  }
+
+  private async removeDuplicatesIfEmpty(dir: string): Promise<void> {
+    if (!(await fs.pathExists(dir))) {
+      return;
+    }
+    try {
+      const contents = await fs.readdir(dir);
+      if (contents.length === 0) {
+        await fs.remove(dir);
+      }
+    } catch (error) {
+      log.warn('Failed to inspect duplicates directory %s: %s', dir, (error as Error).message);
+    }
+  }
+
+  private async handleDownloadsCleanup(downloadDir: string, shouldDelete: boolean): Promise<void> {
+    if (!(await fs.pathExists(downloadDir))) {
+      return;
+    }
+    try {
+      if (shouldDelete) {
+        await fs.remove(downloadDir);
+        return;
+      }
+      const contents = await fs.readdir(downloadDir);
+      if (contents.length === 0) {
+        await fs.remove(downloadDir);
+      }
+    } catch (error) {
+      log.warn('Failed to clean downloads directory %s: %s', downloadDir, (error as Error).message);
+    }
+  }
+
+  private async removeLegacyStateDir(dir: string): Promise<void> {
+    if (!(await fs.pathExists(dir))) {
+      return;
+    }
+    try {
+      await fs.remove(dir);
+    } catch (error) {
+      log.warn('Failed to remove legacy state directory %s: %s', dir, (error as Error).message);
     }
   }
 }

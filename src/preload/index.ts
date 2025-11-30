@@ -9,6 +9,7 @@ const api: RendererAPI = {
   pausePipeline: (): Promise<{ paused: boolean }> => ipcRenderer.invoke('pipeline:pause'),
   resumePipeline: (): Promise<{ paused: boolean }> => ipcRenderer.invoke('pipeline:resume'),
   exportDiagnostics: (): Promise<{ path: string }> => ipcRenderer.invoke('pipeline:diagnostics'),
+  openOutputFolder: (): Promise<{ path: string }> => ipcRenderer.invoke('pipeline:open-output'),
   onProgress: (callback: (event: PipelineProgressEvent) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: PipelineProgressEvent) => callback(payload);
     ipcRenderer.on('pipeline:progress', listener);

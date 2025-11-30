@@ -19,16 +19,26 @@ interface PersistedState {
 
 export class StateStore {
   private readonly statePath: string;
+  private readonly legacyStateDir: string;
   private state: PersistedState = { entries: {} };
 
-  constructor(workDir: string) {
-    this.statePath = path.join(workDir, 'state.json');
+  constructor(outputDir: string) {
+    this.statePath = path.join(outputDir, 'state.json');
+    this.legacyStateDir = path.join(outputDir, 'state');
   }
 
   async load(): Promise<void> {
     await fs.ensureDir(path.dirname(this.statePath));
     if (await fs.pathExists(this.statePath)) {
       this.state = await fs.readJson(this.statePath);
+      return;
+    }
+
+    const legacyPath = path.join(this.legacyStateDir, 'state.json');
+    if (await fs.pathExists(legacyPath)) {
+      this.state = await fs.readJson(legacyPath);
+      await fs.remove(this.legacyStateDir).catch(() => undefined);
+      await fs.writeJson(this.statePath, this.state, { spaces: 2 });
     }
   }
 

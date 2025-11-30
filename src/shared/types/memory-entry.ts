@@ -36,6 +36,7 @@ export interface PipelineOptions {
   throttleDelayMs: number;
   attemptTimeoutMs: number;
   keepZipPayloads: boolean;
+  cleanupDownloads: boolean;
   dedupeStrategy: 'move' | 'delete' | 'none';
   dryRun: boolean;
   verifyOnly: boolean;
