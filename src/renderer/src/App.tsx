@@ -179,6 +179,23 @@ const App = () => {
     }
   };
 
+  const canAdvanceFrom = (current: number): boolean => {
+    if (current === 0) return true;
+    if (current === 1) return Boolean(exportZip);
+    if (current === 2) return Boolean(outputDir);
+    if (current === 3) return true;
+    return false;
+  };
+
+  const goNext = () => {
+    if (!canAdvanceFrom(step)) return;
+    setStep((prev) => Math.min(prev + 1, 4));
+  };
+
+  const goBack = () => {
+    setStep((prev) => Math.max(prev - 1, 0));
+  };
+
   const renderStats = () => {
     const entries = [
       { label: 'Total Memories', value: stats?.total ?? '--' },
@@ -205,7 +222,7 @@ const App = () => {
   };
 
   const renderStepper = () => (
-    <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       {STEPS.map((info, index) => {
         const isActive = index === step;
         const isComplete = index < step;
@@ -215,14 +232,14 @@ const App = () => {
             ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
             : 'border-white/10 bg-white/5 text-slate-300';
         return (
-          <div key={info.title} className={`flex gap-3 rounded-2xl border p-4 transition ${stateClasses}`}>
-            <div className={`flex h-10 w-10 items-center justify-center rounded-xl font-semibold ${isActive || isComplete ? 'bg-white/90 text-slate-900' : 'bg-slate-800 text-white/80'}`}>
-              {index + 1}
-            </div>
-            <div className="space-y-1">
+          <div key={info.title} className={`rounded-2xl border p-4 transition ${stateClasses}`}>
+            <div className="flex items-center gap-3">
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full border font-semibold ${isActive || isComplete ? 'border-white/50 bg-white/90 text-slate-900' : 'border-white/20 bg-slate-900/40 text-white/80'}`}>
+                {index + 1}
+              </div>
               <p className="text-sm font-semibold">{info.title}</p>
-              <p className="text-xs text-slate-300">{info.description}</p>
             </div>
+            <p className="mt-2 text-xs text-slate-300">{info.description}</p>
           </div>
         );
       })}
@@ -530,6 +547,32 @@ const App = () => {
 
         {renderStepper()}
         {renderCurrentStep()}
+        {step < 4 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/5 bg-black/30 px-4 py-3 text-sm text-slate-200">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Wizard controls</p>
+              <p>{step === 0 ? 'Review the guidance before continuing.' : step === 1 ? 'Select a ZIP to move forward.' : step === 2 ? 'Choose an output folder next.' : 'Review options, then proceed to the run stage.'}</p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                data-tooltip="Return to the previous step."
+                className="rounded-xl border border-white/20 px-5 py-2 font-semibold text-white transition hover:border-white/50 disabled:opacity-40"
+                onClick={goBack}
+                disabled={step === 0}
+              >
+                Back
+              </button>
+              <button
+                data-tooltip="Continue to the next step in the wizard."
+                className="rounded-xl bg-brand-500 px-5 py-2 font-semibold text-white shadow-brand-500/30 transition hover:bg-brand-400 disabled:opacity-40"
+                onClick={goNext}
+                disabled={!canAdvanceFrom(step)}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
