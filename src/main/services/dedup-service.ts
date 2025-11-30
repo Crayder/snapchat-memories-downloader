@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import type { MemoryEntry } from '../../shared/types/memory-entry.js';
 import { streamHash } from '../utils/files.js';
 import type { ProgressCallback } from '../types.js';
+import type { PauseSignal } from '../pipeline/pipeline-control.js';
 
 export interface DedupOptions {
   duplicatesDir: string;
@@ -12,12 +13,13 @@ export interface DedupOptions {
 export class DedupService {
   constructor(private readonly options: DedupOptions) {}
 
-  async run(entries: MemoryEntry[], progress: ProgressCallback): Promise<void> {
+  async run(entries: MemoryEntry[], progress: ProgressCallback, control?: PauseSignal): Promise<void> {
     await fs.ensureDir(this.options.duplicatesDir);
     const urlMap = new Map<string, MemoryEntry>();
     const hashMap = new Map<string, MemoryEntry>();
 
     for (const entry of entries) {
+      await control?.waitIfPaused();
       if (!entry.finalPath || entry.downloadStatus === 'failed') {
         continue;
       }

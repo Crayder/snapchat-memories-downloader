@@ -12,6 +12,8 @@ import { detectMagicType } from '../utils/magic-bytes.js';
 import type { StateStore } from './state-store.js';
 import type { ProgressCallback } from '../types.js';
 import log from '../logger.js';
+import type { PauseSignal } from '../pipeline/pipeline-control.js';
+import type { InvestigationJournal } from './investigation-journal.js';
 
 export interface DownloadServiceOptions {
   downloadDir: string;
@@ -22,9 +24,27 @@ export interface DownloadServiceOptions {
 
 export class DownloadService {
   private readonly queue: PQueue;
+  private readonly unsubscribeControl?: () => void;
 
-  constructor(private readonly options: DownloadServiceOptions, private readonly state: StateStore) {
+  constructor(
+    private readonly options: DownloadServiceOptions,
+    private readonly state: StateStore,
+    private readonly control?: PauseSignal,
+    private readonly investigation?: InvestigationJournal
+  ) {
     this.queue = new PQueue({ concurrency: options.concurrency });
+    if (this.control) {
+      this.unsubscribeControl = this.control.onChange(({ paused }) => {
+        if (paused) {
+          this.queue.pause();
+        } else {
+          this.queue.start();
+        }
+      });
+      if (this.control.paused) {
+        this.queue.pause();
+      }
+    }
   }
 
   async run(entries: MemoryEntry[], progress: ProgressCallback): Promise<MemoryEntry[]> {
@@ -47,10 +67,13 @@ export class DownloadService {
       promises.push(job);
     }
 
-    return Promise.all(promises);
+    const results = await Promise.all(promises);
+    this.unsubscribeControl?.();
+    return results;
   }
 
   private async processEntry(entry: MemoryEntry, progress: ProgressCallback): Promise<MemoryEntry> {
+    await this.control?.waitIfPaused();
     const persisted = this.state.get(entry.index);
     if (persisted?.downloadStatus === 'downloaded' && persisted.downloadedPath && (await fs.pathExists(persisted.downloadedPath))) {
       entry.downloadStatus = 'downloaded';
@@ -76,7 +99,9 @@ export class DownloadService {
           this.state.upsert({ index: entry.index, downloadStatus: 'failed', errors: entry.errors, attempts: attempt });
           throw error;
         }
-        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+        const delay = Math.min(2000 * 2 ** (attempt - 1), 30000);
+        await this.delay(delay);
+        await this.control?.waitIfPaused();
       }
     }
 
@@ -117,8 +142,27 @@ export class DownloadService {
     if (magic === 'zip' && !finalPath.endsWith('.zip')) {
       const renamed = `${finalPath}.zip`;
       await fs.move(finalPath, renamed, { overwrite: true });
+      this.investigation?.recordDownload({
+        index: entry.index,
+        method: 'GET',
+        url: downloadUrl,
+        contentType: response.headers.get('content-type'),
+        disposition: response.headers.get('content-disposition'),
+        status: response.status,
+        inferredExt: '.zip'
+      });
       return renamed;
     }
+
+    this.investigation?.recordDownload({
+      index: entry.index,
+      method: entry.downloadMethodHint === 'POST' ? 'POST' : 'GET',
+      url: downloadUrl,
+      contentType: response.headers.get('content-type'),
+      disposition: response.headers.get('content-disposition'),
+      status: response.status,
+      inferredExt: resolvedExt
+    });
 
     return finalPath;
   }
@@ -144,6 +188,10 @@ export class DownloadService {
     }
     const text = await response.text();
     return text.trim();
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async determineExtension(disposition: string | null, contentType: string | null, filePath: string, mediaType: string): Promise<string> {

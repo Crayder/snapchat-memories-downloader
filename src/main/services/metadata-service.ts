@@ -3,11 +3,13 @@ import { exiftool } from 'exiftool-vendored';
 import type { MemoryEntry } from '../../shared/types/memory-entry.js';
 import { toExifTimestamp } from '../utils/date.js';
 import type { ProgressCallback } from '../types.js';
+import type { PauseSignal } from '../pipeline/pipeline-control.js';
 import log from '../logger.js';
 
 export class MetadataService {
-  async run(entries: MemoryEntry[], progress: ProgressCallback): Promise<void> {
+  async run(entries: MemoryEntry[], progress: ProgressCallback, control?: PauseSignal): Promise<void> {
     for (const entry of entries) {
+      await control?.waitIfPaused();
       if (!entry.finalPath || entry.downloadStatus !== 'processed') {
         continue;
       }

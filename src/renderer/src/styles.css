@@ -24,6 +24,42 @@ body {
   gap: 1.5rem;
 }
 
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  background: #181b22;
+  opacity: 0.5;
+}
+
+.step.complete,
+.step.active {
+  opacity: 1;
+}
+
+.step-index {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.step-label {
+  font-size: 0.9rem;
+}
+
 header {
   display: flex;
   justify-content: space-between;
@@ -127,6 +163,22 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.wizard-nav {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+.wizard-nav button {
+  background: #2a2f3b;
+}
+
+.wizard-nav button.primary,
+.run-controls .primary,
+.card button.primary {
+  background: #2563eb;
+}
+
 .log-panel {
   max-height: 220px;
   overflow-y: auto;
@@ -167,4 +219,40 @@ button:disabled {
 .summary-grid span {
   font-size: 1.2rem;
   font-weight: 600;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.stats-grid div {
+  background: #0f1115;
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.run-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.notice-list {
+  margin: 1rem 0 0;
+  padding-left: 1.25rem;
+  color: #c9cedc;
+  line-height: 1.6;
+}
+
+.diagnostics-note {
+  font-size: 0.85rem;
+  color: #9ca3b5;
+  margin-top: 0.25rem;
 }

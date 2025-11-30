@@ -96,6 +96,10 @@ ipcMain.handle('pipeline:start', async (_, request: PipelineRunRequest) => {
     mainWindow?.webContents.send('pipeline:progress', event);
   };
   const summary = await runner.run(request, (event) => {
+    if (event.type === 'stats' && event.stats) {
+      progressEmitter({ type: 'stats', stats: event.stats });
+      return;
+    }
     const payload: PipelineProgressEvent = {
       type: event.type === 'entry' ? 'entry-status' : event.type === 'phase' ? 'phase' : (event.type as PipelineProgressEvent['type']),
       phase: event.phase,
@@ -107,4 +111,19 @@ ipcMain.handle('pipeline:start', async (_, request: PipelineRunRequest) => {
   });
   progressEmitter({ type: 'summary', summary });
   return summary;
+});
+
+ipcMain.handle('pipeline:pause', () => {
+  runner.pause();
+  return runner.getStatus();
+});
+
+ipcMain.handle('pipeline:resume', () => {
+  runner.resume();
+  return runner.getStatus();
+});
+
+ipcMain.handle('pipeline:diagnostics', async () => {
+  const path = await runner.createDiagnosticsBundle();
+  return { path };
 });

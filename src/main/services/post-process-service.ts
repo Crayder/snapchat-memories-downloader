@@ -11,6 +11,8 @@ import type { MemoryEntry } from '../../shared/types/memory-entry.js';
 import { buildOutputName } from '../utils/naming.js';
 import { detectMagicType } from '../utils/magic-bytes.js';
 import type { ProgressCallback } from '../types.js';
+import type { PauseSignal } from '../pipeline/pipeline-control.js';
+import type { InvestigationJournal } from './investigation-journal.js';
 
 const resolvedFfmpegBinary = typeof ffmpegStatic === 'string' ? ffmpegStatic : null;
 if (resolvedFfmpegBinary) {
@@ -30,12 +32,13 @@ const VIDEO_EXTS = ['.mp4', '.mov', '.m4v'];
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.heic'];
 
 export class PostProcessService {
-  constructor(private readonly options: PostProcessOptions) {}
+  constructor(private readonly options: PostProcessOptions, private readonly investigation?: InvestigationJournal) {}
 
-  async run(entries: MemoryEntry[], progress: ProgressCallback): Promise<MemoryEntry[]> {
+  async run(entries: MemoryEntry[], progress: ProgressCallback, control?: PauseSignal): Promise<MemoryEntry[]> {
     await fs.ensureDir(this.options.outputDir);
     await fs.ensureDir(this.options.tempDir);
     for (const entry of entries) {
+      await control?.waitIfPaused();
       if (entry.downloadStatus !== 'downloaded' || !entry.downloadedPath) {
         continue;
       }
@@ -82,6 +85,13 @@ export class PostProcessService {
     }
     const base = await this.pickBaseFile(files, entry.mediaType);
     const overlays = files.filter((file) => path.extname(file).toLowerCase() === '.png' && file !== base);
+
+    this.investigation?.recordZipPayload({
+      index: entry.index,
+      fileCount: files.length,
+      overlayCount: overlays.length,
+      extensions: this.countExtensions(files)
+    });
 
     if (!base) {
       throw new Error('Unable to identify base media within caption ZIP.');
@@ -221,5 +231,13 @@ export class PostProcessService {
       default:
         return mediaType === 'video' ? '.mp4' : '.jpg';
     }
+  }
+
+  private countExtensions(files: string[]): Record<string, number> {
+    return files.reduce<Record<string, number>>((acc, file) => {
+      const ext = path.extname(file).toLowerCase() || 'unknown';
+      acc[ext] = (acc[ext] ?? 0) + 1;
+      return acc;
+    }, {});
   }
 }

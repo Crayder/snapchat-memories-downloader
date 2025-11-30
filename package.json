@@ -27,6 +27,7 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
+    "archiver": "^6.0.2",
     "cheerio": "^1.0.0-rc.12",
     "clsx": "^2.1.1",
     "electron-log": "^5.1.4",
@@ -49,6 +50,7 @@
   "devDependencies": {
     "@types/ffprobe-static": "^2.0.3",
     "@types/fluent-ffmpeg": "^2.1.28",
+    "@types/archiver": "^6.0.0",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^20.11.30",
     "@types/react": "^18.3.10",
