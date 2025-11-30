@@ -1,5 +1,5 @@
 import fs from 'fs-extra';
-import { exiftool } from 'exiftool-vendored';
+import { ExifTool } from 'exiftool-vendored';
 import type { MemoryEntry } from '../../shared/types/memory-entry.js';
 import { toExifTimestamp } from '../utils/date.js';
 import type { ProgressCallback } from '../types.js';
@@ -7,6 +7,8 @@ import type { PauseSignal } from '../pipeline/pipeline-control.js';
 import log from '../logger.js';
 
 export class MetadataService {
+  private exif = new ExifTool();
+
   async run(entries: MemoryEntry[], progress: ProgressCallback, control?: PauseSignal): Promise<void> {
     for (const entry of entries) {
       await control?.waitIfPaused();
@@ -28,7 +30,8 @@ export class MetadataService {
   }
 
   async dispose(): Promise<void> {
-    await exiftool.end();
+    await this.exif.end();
+    this.exif = new ExifTool();
   }
 
   private async writeMetadata(entry: MemoryEntry): Promise<void> {
@@ -51,7 +54,7 @@ export class MetadataService {
       tags.GPSLongitudeRef = entry.longitude >= 0 ? 'E' : 'W';
     }
 
-    await exiftool.write(entry.finalPath!, tags, ['-overwrite_original']);
+    await this.exif.write(entry.finalPath!, tags, ['-overwrite_original']);
   }
 
   private async alignFileTimestamp(entry: MemoryEntry): Promise<void> {

@@ -114,11 +114,12 @@ export class PostProcessService {
       }
       const base = await this.pickBaseFile(files, entry.mediaType);
       const overlays = files.filter((file) => path.extname(file).toLowerCase() === '.png' && file !== base);
+      const usableOverlays = await this.filterUsableOverlays(overlays, entry);
 
       this.investigation?.recordZipPayload({
         index: entry.index,
         fileCount: files.length,
-        overlayCount: overlays.length,
+        overlayCount: usableOverlays.length,
         extensions: this.countExtensions(files)
       });
 
@@ -133,10 +134,12 @@ export class PostProcessService {
 
       if (targetMediaType === 'video') {
         const videoInfo = await this.getVideoMetadata(base);
-        const overlayAsset = overlays.length ? await this.mergeOverlays(overlays, { width: videoInfo.width, height: videoInfo.height }) : undefined;
+        const overlayAsset = usableOverlays.length
+          ? await this.mergeOverlays(usableOverlays, { width: videoInfo.width, height: videoInfo.height })
+          : undefined;
         await this.overlayVideo(base, overlayAsset, entry, targetMediaType, videoInfo);
       } else {
-        await this.composeImage(base, overlays, entry, targetMediaType);
+        await this.composeImage(base, usableOverlays, entry, targetMediaType);
       }
 
     } catch (error) {
@@ -467,6 +470,25 @@ export class PostProcessService {
     entry.downloadStatus = 'failed';
     entry.failureStage = stage;
     entry.errors = [...(entry.errors ?? []), error.message];
+  }
+
+  private async filterUsableOverlays(paths: string[], entry: MemoryEntry): Promise<string[]> {
+    const usable: string[] = [];
+    for (const overlay of paths) {
+      try {
+        const stats = await fs.stat(overlay);
+        if (stats.size === 0) {
+          throw new Error('overlay file is empty');
+        }
+        await sharp(overlay).metadata();
+        usable.push(overlay);
+      } catch (error) {
+        const reason = (error as Error).message;
+        log.warn('Discarding caption overlay %s for entry #%d: %s', path.basename(overlay), entry.index, reason);
+        entry.errors = [...(entry.errors ?? []), `Caption overlay ignored (${path.basename(overlay)}): ${reason}`];
+      }
+    }
+    return usable;
   }
 
   private async delay(ms: number): Promise<void> {

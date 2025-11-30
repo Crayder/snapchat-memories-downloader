@@ -7,7 +7,7 @@ import type { PipelineStatsPayload } from '../../shared/types/pipeline-stats.js'
 const DEFAULT_OPTIONS: PipelineRunRequest['options'] = {
   concurrency: 3,
   retryLimit: 3,
-  throttleDelayMs: 500,
+  throttleDelayMs: 1000,
   attemptTimeoutMs: 15000,
   cleanupDownloads: true,
   retryFailedOnly: false,
@@ -107,9 +107,13 @@ const App = () => {
 
     const dispose = window.electronAPI.onProgress((event: PipelineProgressEvent) => {
       if (event.type === 'error') {
-        pushLog(`Error: ${event.message ?? 'Unknown error'}`);
+        const entryPrefix = typeof event.entryIndex === 'number' ? `#${event.entryIndex} ` : '';
+        pushLog(`${entryPrefix}Error: ${event.message ?? 'Unknown error'}`);
         if (autoPauseOnErrorRef.current && runningRef.current && !pausedRef.current) {
-          requestAutoPause('Auto-paused because an error was logged.');
+          const pauseReason = typeof event.entryIndex === 'number'
+            ? `Auto-paused because entry #${event.entryIndex} logged an error.`
+            : 'Auto-paused because an error was logged.';
+          requestAutoPause(pauseReason);
         }
       }
 
@@ -520,7 +524,7 @@ const App = () => {
         </label>
       </div>
       <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
-        Snapchat can rate limit aggressively if concurrency is high and no delay is used. Start with a 250-500 ms delay and increase slowly once the export flows reliably; keep the timeout under a minute so individual memories do not stall the queue indefinitely.
+        Snapchat can rate limit aggressively if concurrency is high and no delay is used. Start with a 500-1000 ms delay and increase slowly once the export flows reliably; keep the timeout under a minute so individual memories do not stall the queue indefinitely.
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 p-3 text-sm" data-tooltip="Run parsing and validation without downloading media.">

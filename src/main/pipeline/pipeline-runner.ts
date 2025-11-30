@@ -176,6 +176,7 @@ export class PipelineRunner {
       const reportService = new ReportService(reportDir);
       const reportPath = await reportService.create(entries, summary);
       summary.reportPath = reportPath;
+      this.persistStateSnapshot(entries, stateStore);
       await stateStore.save();
       await this.metadataService.dispose();
       await investigation.writeReport(reportDir);
@@ -480,5 +481,20 @@ export class PipelineRunner {
       }
     }
     return breakdown;
+  }
+
+  private persistStateSnapshot(entries: MemoryEntry[], stateStore: StateStore): void {
+    for (const entry of entries) {
+      stateStore.upsert({
+        index: entry.index,
+        downloadStatus: entry.downloadStatus,
+        downloadedPath: entry.downloadedPath,
+        finalPath: entry.finalPath,
+        contentHash: entry.contentHash,
+        errors: entry.errors,
+        attempts: entry.attempts,
+        failureStage: entry.failureStage
+      });
+    }
   }
 }
