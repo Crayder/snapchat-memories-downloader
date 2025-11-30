@@ -20,7 +20,7 @@ const createWindow = async () => {
     width: 1200,
     height: 800,
     show: false,
-    title: 'Snap Memories Backup',
+    title: 'Snapchat Memories Downloader',
     webPreferences: {
       // electron-vite outputs preload bundle as preload.mjs; use explicit extension
       preload: path.join(__dirname, '../preload/preload.mjs'),

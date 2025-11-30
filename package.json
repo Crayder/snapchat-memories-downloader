@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
+    "prebuild": "npm run build:icons && npm run build:icon-bundles",
     "build": "electron-vite build && electron-builder",
+    "build:icons": "node scripts/generate-icons.mjs",
+    "build:icon-bundles": "node scripts/generate-icon-bundles.cjs",
     "preview": "electron-vite preview",
     "lint": "eslint . --ext .ts,.tsx,.mts,.cts --max-warnings=0",
     "format": "prettier --write \"{src,config,scripts}/**/*.{ts,tsx,cts,mts}\" docs/**/*.md",
@@ -66,6 +69,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-react-hooks": "^4.6.2",
     "eslint-plugin-react-refresh": "^0.4.7",
+    "icon-gen": "^3.0.1",
     "postcss": "^8.5.6",
     "prettier": "^3.3.3",
     "tailwindcss": "^3.4.13",
@@ -74,8 +78,8 @@
     "vitest": "^1.6.0"
   },
   "build": {
-    "appId": "app.snap.memories.backup",
-    "productName": "Snap Memories Backup",
+    "appId": "app.snap.memories.downloader",
+    "productName": "Snapchat Memories Downloader",
     "directories": {
       "buildResources": "resources"
     },
@@ -86,7 +90,8 @@
     ],
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "resources/bin/icons/app.ico"
     },
     "extraResources": [
       {
@@ -103,10 +108,12 @@
       "allowToChangeInstallationDirectory": true
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "resources/bin/icons/app.icns"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "resources/bin/icons/icon-512.png"
     }
   }
 }
